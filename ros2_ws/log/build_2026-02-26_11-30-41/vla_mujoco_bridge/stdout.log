@@ -1,0 +1,23 @@
+running develop
+running egg_info
+creating vla_mujoco_bridge.egg-info
+writing vla_mujoco_bridge.egg-info/PKG-INFO
+writing dependency_links to vla_mujoco_bridge.egg-info/dependency_links.txt
+writing entry points to vla_mujoco_bridge.egg-info/entry_points.txt
+writing requirements to vla_mujoco_bridge.egg-info/requires.txt
+writing top-level names to vla_mujoco_bridge.egg-info/top_level.txt
+writing manifest file 'vla_mujoco_bridge.egg-info/SOURCES.txt'
+reading manifest file 'vla_mujoco_bridge.egg-info/SOURCES.txt'
+writing manifest file 'vla_mujoco_bridge.egg-info/SOURCES.txt'
+running build_ext
+Creating /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/lib/python3.10/site-packages/vla-mujoco-bridge.egg-link (link to .)
+Installing bridge_node script to /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/lib/vla_mujoco_bridge
+Installing teleop_node script to /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/lib/vla_mujoco_bridge
+
+Installed /media/orka/storage/robotics/ros2_ws/build/vla_mujoco_bridge
+running symlink_data
+creating /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/share/ament_index
+creating /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/share/ament_index/resource_index
+creating /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/share/ament_index/resource_index/packages
+symbolically linking /media/orka/storage/robotics/ros2_ws/build/vla_mujoco_bridge/resource/vla_mujoco_bridge -> /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/share/ament_index/resource_index/packages
+symbolically linking /media/orka/storage/robotics/ros2_ws/build/vla_mujoco_bridge/package.xml -> /media/orka/storage/robotics/ros2_ws/install/vla_mujoco_bridge/share/vla_mujoco_bridge

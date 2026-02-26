@@ -1,0 +1,22 @@
+Wheel-Version: 1.0
+Generator: bdist_wheel (0.42.0)
+Root-Is-Purelib: true
+Tag: py2-none-manylinux_2_28_x86_64
+Tag: py27-none-manylinux_2_28_x86_64
+Tag: py3-none-manylinux_2_28_x86_64
+Tag: py30-none-manylinux_2_28_x86_64
+Tag: py31-none-manylinux_2_28_x86_64
+Tag: py32-none-manylinux_2_28_x86_64
+Tag: py33-none-manylinux_2_28_x86_64
+Tag: py34-none-manylinux_2_28_x86_64
+Tag: py35-none-manylinux_2_28_x86_64
+Tag: py36-none-manylinux_2_28_x86_64
+Tag: py37-none-manylinux_2_28_x86_64
+Tag: py38-none-manylinux_2_28_x86_64
+Tag: py39-none-manylinux_2_28_x86_64
+Tag: py310-none-manylinux_2_28_x86_64
+Tag: py311-none-manylinux_2_28_x86_64
+Tag: py312-none-manylinux_2_28_x86_64
+Tag: py313-none-manylinux_2_28_x86_64
+Tag: py314-none-manylinux_2_28_x86_64
+

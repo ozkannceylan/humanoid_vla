@@ -1,0 +1,43 @@
+<!--
+  sim/g1_with_camera.xml
+  Standalone scene for Unitree G1 with egocentric camera.
+
+  Uses sim/models/g1_29dof.xml (local copy of upstream, camera added directly
+  to torso_link body). Mesh path is patched in the local copy to point to repos/.
+
+  Camera position tuning: run test_g1.py and adjust pos in
+  sim/models/g1_29dof.xml until ego_camera view looks like a head-mounted
+  forward-facing camera.
+-->
+<mujoco model="g1_with_camera">
+
+  <include file="models/g1_29dof.xml"/>
+
+  <statistic center="0 0 0.5" extent="2.0"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-130" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0"
+             width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge"
+             rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8"
+             width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true"
+              texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <!-- Simple table for manipulation tasks (Phase B+) -->
+    <body name="table" pos="0.6 0 0">
+      <geom type="box" size="0.3 0.3 0.4" pos="0 0 0.4" rgba="0.6 0.4 0.2 1"/>
+    </body>
+  </worldbody>
+
+</mujoco>

@@ -1,0 +1,13 @@
+Metadata-Version: 2.1
+Name: vla-mujoco-bridge
+Version: 0.1.0
+Summary: MuJoCo-ROS2 bridge for Unitree G1 simulation (Phase A)
+Home-page: UNKNOWN
+Maintainer: Ozkan Ceylan
+Maintainer-email: ozkannceylan@gmail.com
+License: Apache-2.0
+Platform: UNKNOWN
+Provides-Extra: test
+
+UNKNOWN
+

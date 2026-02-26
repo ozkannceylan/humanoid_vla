@@ -1,0 +1,4 @@
+[console_scripts]
+bridge_node = vla_mujoco_bridge.bridge_node:main
+teleop_node = vla_mujoco_bridge.teleop_node:main
+
