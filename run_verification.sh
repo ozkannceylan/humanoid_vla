@@ -1,0 +1,158 @@
+#!/bin/bash
+# run_verification.sh — Phase A Verification Test Runner
+# Run from project root: bash run_verification.sh
+
+set -e  # Exit on error
+
+echo "========================================================================"
+echo "PHASE A VERIFICATION TEST SUITE"
+echo "========================================================================"
+echo ""
+echo "This script will run systematic tests to verify Phase A is working"
+echo "correctly on your RTX 4050 before moving to Phase B."
+echo ""
+echo "Tests will be run in order: L0 → L1 → L2 → L3 → L4"
+echo "Estimated time: 30-60 minutes (plus optional 1-hour stability test)"
+echo ""
+read -p "Press Enter to start, or Ctrl+C to cancel..."
+
+PROJECT_ROOT="$(pwd)"
+RESULTS_DIR="$PROJECT_ROOT/test_results"
+mkdir -p "$RESULTS_DIR"
+
+LOG_FILE="$RESULTS_DIR/verification_$(date +%Y%m%d_%H%M%S).log"
+echo "Logging to: $LOG_FILE"
+
+# Redirect all output to log and terminal
+exec > >(tee -a "$LOG_FILE")
+exec 2>&1
+
+echo ""
+echo "========================================================================"
+echo "L0: STANDALONE SIMULATION TEST"
+echo "========================================================================"
+echo ""
+echo "Testing MuJoCo simulation without ROS2..."
+echo ""
+
+cd "$PROJECT_ROOT"
+
+# L0 Test - 60 seconds with viewer
+echo "[L0.1] Running with viewer (60 seconds)..."
+if python3 tests/test_l0_standalone.py --duration 60; then
+    echo "✅ L0.1 PASSED"
+else
+    echo "❌ L0.1 FAILED"
+    exit 1
+fi
+
+echo ""
+echo "[L0.2] Running headless for VRAM profiling (60 seconds)..."
+if python3 tests/test_l0_standalone.py --duration 60 --headless; then
+    echo "✅ L0.2 PASSED"
+else
+    echo "❌ L0.2 FAILED"
+    exit 1
+fi
+
+echo ""
+echo "========================================================================"
+echo "L1: ROS2 COMPONENT TESTS"
+echo "========================================================================"
+echo ""
+echo "⚠️  MANUAL TESTING REQUIRED"
+echo ""
+echo "The following tests require multiple terminals and manual verification."
+echo "Please refer to: docs/phase_a_testing_guide.md"
+echo ""
+echo "L1.1: Bridge Node Topic Publishing"
+echo "  Terminal 1: ros2 run vla_mujoco_bridge bridge_node"
+echo "  Terminal 2: ros2 topic hz /joint_states"
+echo "  Terminal 3: ros2 topic hz /camera/image_raw"
+echo "  Terminal 4: ros2 topic echo /joint_states --once"
+echo "  Terminal 5: ros2 run rqt_image_view rqt_image_view"
+echo ""
+echo "L1.2: Teleop Node Command Generation"
+echo "  Terminal 1: ros2 run vla_mujoco_bridge teleop_node"
+echo "  Terminal 2: ros2 topic echo /joint_commands"
+echo "  Test keypresses: w, s, i, k, r, ESC"
+echo ""
+read -p "Press Enter when L1 tests are complete..."
+
+echo ""
+echo "========================================================================"
+echo "L2: END-TO-END INTEGRATION TEST"
+echo "========================================================================"
+echo ""
+echo "⚠️  MANUAL TESTING REQUIRED"
+echo ""
+echo "Run the following in 3 terminals:"
+echo "  Terminal 1: ros2 run vla_mujoco_bridge bridge_node"
+echo "  Terminal 2: ros2 run vla_mujoco_bridge teleop_node"
+echo "  Terminal 3: ros2 run rqt_image_view rqt_image_view"
+echo ""
+echo "Verify:"
+echo "  - Keypress → motion in viewer < 100ms"
+echo "  - Camera feed shows motion"
+echo "  - No freezing or crashes"
+echo ""
+read -p "Press Enter when L2 tests are complete..."
+
+echo ""
+echo "========================================================================"
+echo "L3: PERFORMANCE PROFILING"
+echo "========================================================================"
+echo ""
+echo "⚠️  MANUAL TESTING REQUIRED"
+echo ""
+echo "L3.1: VRAM Profiling"
+echo "  1. Start monitoring: nvidia-smi --query-gpu=memory.used --format=csv --loop=1 > gpu_log.csv"
+echo "  2. Run bridge with viewer for 5 minutes"
+echo "  3. Analyze: cat gpu_log.csv | grep -v timestamp | sort -n | tail -1"
+echo "  4. Modify bridge_node.py for headless, rebuild"
+echo "  5. Repeat test in headless mode"
+echo ""
+echo "L3.2: Physics FPS Stability"
+echo "  Run bridge for 10 minutes, verify no slowdown warnings"
+echo ""
+read -p "Press Enter when L3 tests are complete..."
+
+echo ""
+echo "========================================================================"
+echo "L4: ROBUSTNESS VERIFICATION"
+echo "========================================================================"
+echo ""
+echo "⚠️  MANUAL TESTING REQUIRED"
+echo ""
+echo "L4.1: Headless Mode"
+echo "  1. Modify bridge_node.py: launch_viewer=False"
+echo "  2. Rebuild: cd ros2_ws && colcon build"
+echo "  3. Run: ros2 run vla_mujoco_bridge bridge_node"
+echo "  4. Verify topics: ros2 topic hz /joint_states /camera/image_raw"
+echo "  5. Verify camera: ros2 run rqt_image_view rqt_image_view"
+echo ""
+echo "L4.2: Long-Duration Stability (1 hour)"
+echo "  1. Start VRAM monitoring: nvidia-smi --loop=10 > vram_1hr.csv"
+echo "  2. Run bridge for 1 hour"
+echo "  3. Analyze VRAM growth (should be < 50MB/hr)"
+echo ""
+read -p "Press Enter when L4 tests are complete..."
+
+echo ""
+echo "========================================================================"
+echo "VERIFICATION COMPLETE"
+echo "========================================================================"
+echo ""
+echo "All automated tests passed!"
+echo "Manual tests require your confirmation."
+echo ""
+echo "Next steps:"
+echo "  1. Fill in test results in: docs/phase_a_baseline.md"
+echo "  2. Review VRAM headroom for Phase B model selection"
+echo "  3. Decide on Phase B readiness (see testing guide)"
+echo "  4. Commit results: git add docs/ && git commit -m 'Phase A verification complete'"
+echo ""
+echo "Full log saved to: $LOG_FILE"
+echo ""
+echo "🎉 Phase A verification framework is ready!"
+echo ""

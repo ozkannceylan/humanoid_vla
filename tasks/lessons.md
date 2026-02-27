@@ -55,3 +55,53 @@ bash users: `setup.bash` in `.bashrc` is correct and unaffected.
 **Rule:** Always `source /opt/ros/humble/setup.bash` BEFORE activating the venv.
 Reversing this order makes `rclpy` unavailable.
 Also: set `MUJOCO_GL=egl` before any mujoco import, ideally at the very top of `main()`.
+
+## L007: Systematic verification is critical before next phase
+**Context:** Phase A implementation complete, but user requested comprehensive testing before Phase B.
+**Lesson:** Always implement thorough verification BEFORE marking a phase "complete". Create:
+  1. Automated tests where possible (L0: standalone sim test)
+  2. Comprehensive manual test guide (L1-L4: components, integration, performance, robustness)
+  3. Performance baseline documentation template (fill in with actual metrics)
+  4. Test pyramid structure (standalone → components → integration → performance → robustness)
+**Impact:** Prevents discovering integration issues late. Establishes performance baselines for debugging.
+VRAM profiling is critical for GPU-constrained projects (RTX 4050 with 6GB) to decide VLA model selection.
+
+## L008: Test levels should match system architecture
+**Pattern:** Test pyramid mirrors system layers:
+  - L0: Standalone (MuJoCo only, no ROS2)
+  - L1: Components (individual ROS2 nodes)
+  - L2: Integration (full teleoperation loop)
+  - L3: Performance (VRAM, FPS, latency)
+  - L4: Robustness (headless mode, long-duration stability)
+**Rule:** Always test each layer independently before integration. Bottom-to-top order catches
+issues early. If integration (L2) fails, you know L0/L1 work and can isolate the problem.
+
+## L009: Headless mode is critical for VLA training
+**Discovery:** VLA training will run for hours/days, cannot keep viewer window open.
+Headless mode (launch_viewer=False) must be verified to work BEFORE Phase B.
+**Implementation:** MuJoCo's Renderer uses EGL offscreen by default. Camera rendering works
+without viewer window. VRAM savings: ~300-500MB (significant on 6GB GPU).
+**Rule:** Always test headless mode separately. Don't assume it works just because viewer mode works.
+
+## L010: VRAM profiling determines model architecture decisions
+**Context:** RTX 4050 (6GB VRAM) can fit ACT (~500MB) but marginal for GR00T N1 INT8 (~4GB).
+**Process:** Profile VRAM in both viewer and headless modes over 5-minute runs. Calculate headroom:
+  Total VRAM - Peak baseline = Available for VLA model.
+**Decision tree:**
+  - Headroom > 4GB: ACT fits comfortably (recommended)
+  - Headroom 3-4GB: GR00T N1 INT8 possible in headless, tight
+  - Headroom < 3GB: Must use cloud GPU or quantize further
+**Rule:** Always profile VRAM before committing to model architecture. Discovering insufficient
+VRAM mid-training wastes days of work.
+
+## L011: Documentation pyramid matches code pyramid
+**Pattern:** For each phase, create 3 documentation levels:
+  1. Quick start (5-minute overview, common commands)
+  2. Comprehensive guide (detailed procedures, troubleshooting)
+  3. Baseline/results template (fill in with actual metrics)
+**Example (Phase A):**
+  - VERIFICATION_QUICKSTART.md: 30-second summary, key commands
+  - phase_a_testing_guide.md: Full L0-L4 procedures with success criteria
+  - phase_a_baseline.md: Performance metrics template to fill in
+**Rule:** Don't write a single massive document. Quick start for 90% of users, comprehensive
+guide for debugging, baseline for reproducibility.
