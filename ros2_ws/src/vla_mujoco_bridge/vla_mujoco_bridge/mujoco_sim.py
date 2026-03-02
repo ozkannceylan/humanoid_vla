@@ -9,8 +9,18 @@ Threading model:
 
 PD Controller:
   G1 uses torque actuators (<motor> type). To follow position targets we
-  implement τ = Kp*(q_des - q) - Kd*q_dot, clipped to ctrlrange.
-  Gains are tuned per joint group based on torque limits.
+  implement τ = Kp*(q_des - q) - Kd*q_dot + qfrc_bias[6:35] (gravity comp),
+  clipped to ctrlrange.
+
+Gravity compensation:
+  data.qfrc_bias[6:35] contains the gravity + Coriolis forces for the 29
+  actuated joints (DOF indices 6-34; DOFs 0-5 are the floating base freejoint).
+  Adding this to the PD torques makes the robot hold its pose against gravity.
+
+Fixed base mode:
+  When fixed_base=True, the pelvis (qpos[0:7]) is kinematically frozen each
+  step at the initial standing height. This is the standard approach for arm
+  manipulation demos when locomotion is not yet implemented.
 """
 
 import os
@@ -22,10 +32,15 @@ import mujoco.viewer
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-MODEL_PATH = "/media/orka/storage/robotics/sim/g1_with_camera.xml"
+DEFAULT_MODEL_PATH = "/home/ozkan/projects/humanoid_vla/sim/g1_with_camera.xml"
 CAMERA_NAME = "ego_camera"
 RENDER_WIDTH = 640
 RENDER_HEIGHT = 480
+
+# Indices into qfrc_bias for the 29 actuated joints.
+# G1 freejoint (floating_base_joint) occupies DOFs 0-5; actuated joints are 6-34.
+_ACTUATED_DOF_START = 6
+_ACTUATED_DOF_END = 35  # exclusive
 
 # PD gains indexed by actuator index (29 joints)
 # Tuned as: Kp ~ 0.5 * ctrlrange_max, Kd ~ 0.1 * Kp
@@ -52,6 +67,14 @@ class MujocoSim:
     """
     Encapsulates MuJoCo model, data, renderer, and physics loop.
 
+    Parameters
+    ----------
+    model_path   : path to the MJCF scene XML (default: g1_with_camera.xml)
+    gravity_comp : add qfrc_bias[6:35] to PD torques — robot holds pose (default: True)
+    fixed_base   : kinematically freeze pelvis at initial height — for arm demos (default: False)
+    render_hz    : camera render rate
+    physics_hz   : physics step rate
+
     External API (thread-safe, called from ROS2 threads):
       get_joint_state()      -> (positions, velocities, names)
       get_latest_frame()     -> RGB numpy array or None
@@ -59,14 +82,27 @@ class MujocoSim:
       stop()                 -> signal physics loop to exit
     """
 
-    def __init__(self, render_hz: float = 30.0, physics_hz: float = 500.0):
+    def __init__(
+        self,
+        model_path: str = DEFAULT_MODEL_PATH,
+        gravity_comp: bool = True,
+        fixed_base: bool = False,
+        render_hz: float = 30.0,
+        physics_hz: float = 500.0,
+    ):
+        self.gravity_comp = gravity_comp
+        self.fixed_base = fixed_base
         self.render_hz = render_hz
         self.physics_hz = physics_hz
         self.physics_dt = 1.0 / physics_hz
         self.render_interval = 1.0 / render_hz
 
-        self.model = mujoco.MjModel.from_xml_path(MODEL_PATH)
+        self.model = mujoco.MjModel.from_xml_path(model_path)
         self.data = mujoco.MjData(self.model)
+
+        # Store initial pelvis pose for fixed_base freeze
+        mujoco.mj_forward(self.model, self.data)
+        self._base_qpos = self.data.qpos[:7].copy()  # xyz + quaternion
 
         # Validate camera
         cam_id = mujoco.mj_name2id(
@@ -132,11 +168,13 @@ class MujocoSim:
     # ------------------------------------------------------------------
 
     def _compute_pd_torques(self) -> np.ndarray:
-        """τ = Kp*(q_des - q) - Kd*q_dot, clipped to ctrlrange."""
+        """τ = Kp*(q_des - q) - Kd*q_dot [+ qfrc_bias], clipped to ctrlrange."""
         q = self.data.actuator_length.copy()
         qd = self.data.actuator_velocity.copy()
         tau = _KP * (self._target_pos - q) - _KD * qd
-        # Clip each joint to its torque limit
+        if self.gravity_comp:
+            # qfrc_bias[6:35] = gravity + Coriolis for the 29 actuated joints
+            tau += self.data.qfrc_bias[_ACTUATED_DOF_START:_ACTUATED_DOF_END]
         tau = np.clip(tau, self._ctrlrange[:, 0], self._ctrlrange[:, 1])
         return tau
 
@@ -173,6 +211,12 @@ class MujocoSim:
 
                     # Physics step
                     mujoco.mj_step(self.model, self.data)
+
+                    # Fixed-base: freeze pelvis at initial standing pose
+                    if self.fixed_base:
+                        self.data.qpos[:7] = self._base_qpos
+                        self.data.qvel[:6] = 0.0
+                        mujoco.mj_forward(self.model, self.data)
 
                     # Snapshot joint state
                     np.copyto(self.latest_joint_pos, self.data.actuator_length)

@@ -42,6 +42,21 @@ Create `mujoco.Renderer` inside `run_physics_loop()` (not `__init__`) so the EGL
 is bound to the correct thread. Segfault occurs if Renderer is created on a different thread
 than it is used.
 
+## L007: Ubuntu 24.04 uses ROS2 Jazzy, not Humble
+**Discovery:** `install_ros2.sh` originally targeted Ubuntu 22.04 (Jammy) with `ros-humble-*`.
+On Ubuntu 24.04 (Noble), only `ros-jazzy-*` packages exist.
+**Fix:** Script now auto-detects Ubuntu version via `/etc/os-release` and sets `ROS_DISTRO`
+accordingly. Path becomes `/opt/ros/jazzy/` instead of `/opt/ros/humble/`.
+**Rule:** Always source `/opt/ros/${ROS_DISTRO}/setup.bash`. Check `lsb_release -a` first.
+
+## L008: Ubuntu 24.04 pip requires --break-system-packages
+**Discovery:** Ubuntu 24.04 enforces PEP 668 — `pip3 install` without flags raises
+"externally managed environment" error.
+**Fix:** `pip3 install --break-system-packages mujoco opencv-python numpy pynput`
+Installs to `~/.local/lib/python3.12/site-packages/` which is always in sys.path.
+This is safe — it does NOT affect system packages, it installs to user-local space.
+**Rule:** Use `--break-system-packages` on Ubuntu 24.04 for user pip installs.
+
 ## L005: Source setup.zsh in zsh, not setup.bash
 **Root cause:** `setup.bash` uses `${BASH_SOURCE[0]}` which is empty in zsh. This makes
 `AMENT_CURRENT_PREFIX` resolve to the current working directory instead of `/opt/ros/humble`,
@@ -55,3 +70,34 @@ bash users: `setup.bash` in `.bashrc` is correct and unaffected.
 **Rule:** Always `source /opt/ros/humble/setup.bash` BEFORE activating the venv.
 Reversing this order makes `rclpy` unavailable.
 Also: set `MUJOCO_GL=egl` before any mujoco import, ideally at the very top of `main()`.
+## L009: Gravity compensation uses qfrc_bias[6:35] for G1
+**Discovery:** G1's freejoint (floating_base_joint) occupies DOFs 0-5. The 29 actuated
+hinge joints occupy DOFs 6-34 in velocity space.
+**Fix:** Add `data.qfrc_bias[6:35]` to the PD torques in `_compute_pd_torques`.
+This alone makes the robot hold any pose against gravity without active balance control.
+**Rule:** For fixed-base manipulation demos, gravity_comp=True + fixed_base=True is the
+right starting point. No locomotion controller needed.
+
+## L010: ament_python build fails on Ubuntu 24.04 due to setuptools >= 70
+**Discovery:** setuptools >= 70 removed support for `python setup.py install` and
+`python setup.py develop --uninstall` which ament_python's colcon build type invokes.
+pip installs setuptools 80.x by default on Ubuntu 24.04, breaking `colcon build`.
+**Fix:** Downgrade pip-installed setuptools: `pip3 install --break-system-packages setuptools==68.2.2`
+The system apt package `python3-setuptools=68.1.2` would also work but pip overrides it.
+**Rule:** After any LeRobot or major pip install, check `python3 -c "import setuptools; print(setuptools.__version__)"`.
+If >= 70, downgrade to 68.2.2 before running `colcon build`.
+
+## L011: Fixed-base manipulation is the correct Phase B starting point
+**Discovery:** G1 falls immediately during teleoperation because torque-controlled humanoids
+require active balance (ZMP / whole-body control) which is a separate research problem.
+**Fix:** For VLA demo collection, freeze the pelvis kinematically (fixed_base=True) so
+only arm joints are controlled. This matches the standard ACT/LeRobot pipeline where the
+robot is bolted to a table or mounted on a fixed base.
+**Rule:** Only combine locomotion + manipulation in Phase C+. Phase B = arm manipulation only.
+## L012: cv_bridge compiled for NumPy 1.x crashes on NumPy 2.x (Ubuntu 24.04)
+**Discovery:** ROS2 Jazzy's `cv_bridge` is compiled against NumPy 1.x. With NumPy 2.2.6
+(pulled by lerobot), `from cv_bridge import CvBridge` raises ImportError at runtime.
+**Fix:** Replace all cv_bridge calls with direct numpy↔Image conversion:
+  - Publish (rgb8): `msg=Image(); msg.height,msg.width=frame.shape[:2]; msg.encoding="rgb8"; msg.step=frame.shape[1]*3; msg.data=frame.tobytes()`
+  - Subscribe: `np.frombuffer(bytes(msg.data),dtype=np.uint8).reshape(msg.height,msg.width,3)`
+**Rule:** Never use cv_bridge in this project. Direct numpy serialization has no ABI dependencies.

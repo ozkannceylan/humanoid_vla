@@ -33,3 +33,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Personal notes
+tasks/ozkan_todo.md
+
+# Demo data (large binary files)
+data/

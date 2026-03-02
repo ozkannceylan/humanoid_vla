@@ -34,9 +34,22 @@
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
-    <!-- Simple table for manipulation tasks (Phase B+) -->
+
+    <!-- Fixed overhead camera for debugging / demo monitoring -->
+    <camera name="scene_camera" pos="0.6 -1.2 1.8" xyaxes="1 0 0 0 0.5 1"/>
+
+    <!-- Simple table for manipulation tasks -->
     <body name="table" pos="0.6 0 0">
       <geom type="box" size="0.3 0.3 0.4" pos="0 0 0.4" rgba="0.6 0.4 0.2 1"/>
+    </body>
+
+    <!-- Red cube on table — Phase B manipulation target.
+         Freejoint so it can be displaced by the robot hand.
+         Table top is at z=0.8; cube half-size=0.025 → centre z=0.825 -->
+    <body name="red_cube" pos="0.6 0.0 0.825">
+      <freejoint name="cube_joint"/>
+      <geom type="box" size="0.025 0.025 0.025" rgba="0.9 0.1 0.1 1"
+            mass="0.05" solimp="0.99 0.99 0.001" solref="0.01 1"/>
     </body>
   </worldbody>
 

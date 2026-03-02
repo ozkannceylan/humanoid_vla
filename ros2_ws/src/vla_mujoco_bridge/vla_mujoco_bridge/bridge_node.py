@@ -9,7 +9,17 @@ Publishes:
 Subscribes:
   /joint_commands     sensor_msgs/JointState   (on demand)
 
-Run: ros2 run vla_mujoco_bridge bridge_node
+Parameters (set via --ros-args -p key:=value):
+  model_path    (string)  path to MJCF scene XML
+  gravity_comp  (bool)    enable gravity compensation  [default: true]
+  fixed_base    (bool)    freeze pelvis at standing height [default: false]
+  render_hz     (double)  camera render frequency       [default: 30.0]
+  physics_hz    (double)  physics step frequency        [default: 500.0]
+
+Run:
+  ros2 run vla_mujoco_bridge bridge_node
+  ros2 run vla_mujoco_bridge bridge_node \\
+    --ros-args -p model_path:=/path/to/scene.xml -p fixed_base:=true
 """
 
 import os
@@ -23,8 +33,6 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import Image, JointState
-import cv2
-from cv_bridge import CvBridge
 
 from vla_mujoco_bridge.mujoco_sim import MujocoSim
 
@@ -33,7 +41,6 @@ class MujocoBridgeNode(Node):
     def __init__(self, sim: MujocoSim):
         super().__init__("mujoco_bridge_node")
         self.sim = sim
-        self.bridge = CvBridge()
         cbg = ReentrantCallbackGroup()
 
         self.joint_pub = self.create_publisher(JointState, "/joint_states", 10)
@@ -61,8 +68,12 @@ class MujocoBridgeNode(Node):
         frame = self.sim.get_latest_frame()
         if frame is None:
             return
-        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        msg = self.bridge.cv2_to_imgmsg(bgr, encoding="bgr8")
+        # Manual RGB→Image — avoids cv_bridge / NumPy ABI issues
+        msg = Image()
+        msg.height, msg.width = frame.shape[:2]
+        msg.encoding = "rgb8"
+        msg.step = frame.shape[1] * 3
+        msg.data = frame.tobytes()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "ego_camera"
         self.image_pub.publish(msg)
@@ -75,7 +86,29 @@ class MujocoBridgeNode(Node):
 def main(args=None):
     rclpy.init(args=args)
 
-    sim = MujocoSim(render_hz=30.0, physics_hz=500.0)
+    # Read parameters from a temporary node before creating MujocoSim
+    param_node = rclpy.create_node("_bridge_params")
+    param_node.declare_parameter("model_path", "")
+    param_node.declare_parameter("gravity_comp", True)
+    param_node.declare_parameter("fixed_base", False)
+    param_node.declare_parameter("render_hz", 30.0)
+    param_node.declare_parameter("physics_hz", 500.0)
+
+    from vla_mujoco_bridge.mujoco_sim import DEFAULT_MODEL_PATH
+    model_path = param_node.get_parameter("model_path").value or DEFAULT_MODEL_PATH
+    gravity_comp = param_node.get_parameter("gravity_comp").value
+    fixed_base = param_node.get_parameter("fixed_base").value
+    render_hz = param_node.get_parameter("render_hz").value
+    physics_hz = param_node.get_parameter("physics_hz").value
+    param_node.destroy_node()
+
+    sim = MujocoSim(
+        model_path=model_path,
+        gravity_comp=gravity_comp,
+        fixed_base=fixed_base,
+        render_hz=render_hz,
+        physics_hz=physics_hz,
+    )
     node = MujocoBridgeNode(sim)
 
     executor = MultiThreadedExecutor(num_threads=2)
