@@ -376,6 +376,93 @@ No weld constraints — the box is held purely by friction from both hands squee
 
 ---
 
+# Phase D — RosClaw Integration & Task Manager
+
+Last updated: 2026-03-03
+
+**Goal:** Natural language task dispatch via ROS2. A Task Manager node accepts
+NL commands, runs the appropriate ACT model in MuJoCo, and reports results.
+rosbridge_server enables WebSocket access for RosClaw/OpenClaw.
+
+---
+
+## Milestone D.1: VLA Task Manager Node ✅
+
+- [x] `task_manager_node.py` — ROS2 node that:
+  - Subscribes to `/vla/task_goal` (std_msgs/String) for NL task commands
+  - Maps NL commands to appropriate model (single-arm ACT or bimanual ACT)
+  - Runs VLA inference loop in MuJoCo (temporal ensembling)
+  - Publishes `/vla/status` (std_msgs/String) — JSON progress/result
+  - Publishes `/camera/image_raw` (sensor_msgs/Image) during execution
+  - Auto-detects task type: single-arm (reach/grasp/pick/place) vs bimanual
+- [x] Register in setup.py + update package.xml
+
+---
+
+## Milestone D.2: rosbridge_server ✅
+
+- [x] Install ros-jazzy-rosbridge-server
+- [x] Verify: launch rosbridge, connect via WebSocket
+
+---
+
+## Milestone D.3: Launch File ✅
+
+- [x] `launch/vla_system.launch.py` — launches:
+  - rosbridge_server (WebSocket port 9090)
+  - task_manager_node (with model paths)
+
+---
+
+## Milestone D.4: Test End-to-End ✅
+
+- [x] Launch system via launch file
+- [x] Send task via `ros2 topic pub /vla/task_goal std_msgs/String`
+- [x] Verify: VLA runs, status published, success reported
+
+---
+
+# Phase E — Polish & Demo
+
+Last updated: 2026-03-03
+
+---
+
+## Milestone E.1: Demo Videos ✅
+
+- [x] Record individual task videos (scene + ego camera) for all 5 tasks
+- [x] Store in media/ folder (committed, not gitignored)
+- [x] Keep files small (<5MB each)
+
+---
+
+## Milestone E.2: Study Document 05 ✅
+
+- [x] `study/05_system_integration.md` — covers:
+  - Task Manager architecture
+  - NL command parsing and model routing
+  - ROS2 ↔ VLA inference loop
+  - rosbridge WebSocket interface
+  - Full system data flow
+
+---
+
+## Milestone E.3: Finalize README ✅
+
+- [x] Add video embeds for all tasks
+- [x] Document Phase D architecture
+- [x] Update project structure
+- [x] Final success metrics table
+
+---
+
+## Milestone E.4: Final Commit ✅
+
+- [x] Update all docs (lessons.md, todo.md)
+- [x] Git commit + push
+
+---
+
 ## Phase B Quick Reference
 
 ```bash

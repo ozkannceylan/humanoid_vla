@@ -2,31 +2,76 @@
 
 A simulated **Unitree G1 humanoid robot** controlled by a Vision-Language-Action (VLA) model, commandable via natural language. The robot sees through an egocentric camera, understands task commands like *"pick up the red cube"*, and generates joint-level motor commands through a trained **ACT (Action Chunking with Transformers)** model.
 
-> **Status:** Simulation-only (MuJoCo) — Phases A–C2 complete  
+> **Status:** Simulation complete — Phases A–E  
 > **Author:** Özkan Ceylan
+
+---
+
+## Demo Videos
+
+### Single-Arm Manipulation (4 Tasks)
+
+https://github.com/user-attachments/assets/placeholder-all-tasks
+
+<table>
+<tr>
+<td align="center"><b>Reach</b><br><video src="media/reach.mp4" width="300"></video></td>
+<td align="center"><b>Grasp</b><br><video src="media/grasp.mp4" width="300"></video></td>
+</tr>
+<tr>
+<td align="center"><b>Pick Up</b><br><video src="media/pick.mp4" width="300"></video></td>
+<td align="center"><b>Place</b><br><video src="media/place.mp4" width="300"></video></td>
+</tr>
+</table>
+
+### Bimanual Physics-Based Grasping
+
+https://github.com/user-attachments/assets/placeholder-bimanual
+
+<table>
+<tr>
+<td align="center"><b>Bimanual Box Lift</b> — Both hands squeeze box via friction only (no weld constraints), full <code>mj_step</code> dynamics<br><video src="media/bimanual.mp4" width="600"></video></td>
+</tr>
+</table>
+
+> Videos show side-by-side overview camera (left) and robot's egocentric view (right). The ACT model receives only the ego camera image as visual input.
 
 ---
 
 ## Architecture
 
 ```
-User: "Pick up the red cube and place it on the blue plate"
+User: "Pick up the red cube"
   │
-  ▼
-┌─────────────────────────────────────────────┐
-│  VLA Task Manager                           │
-│  Camera image + language → ACT model → 29   │
-│  joint actions @ 30Hz                       │
-└──────────────────────┬──────────────────────┘
-                       │ Joint commands
-┌──────────────────────▼──────────────────────┐
-│  MuJoCo Simulation                          │
-│  Unitree G1 (29 DOF) + table + objects      │
-│  Egocentric camera → 480×640 RGB            │
-└─────────────────────────────────────────────┘
+  ├─── Telegram → OpenClaw (Charlie) → RosClaw ───┐
+  │         (natural language interface)           │
+  │                                                ▼
+  │                              ┌─────────────────────────────┐
+  │                              │  rosbridge (WebSocket:9090) │
+  │                              └────────────┬────────────────┘
+  │                                           ▼
+  │              ┌────────────────────────────────────────────┐
+  └─────────────►│  VLA Task Manager (ROS2 Node)              │
+                 │                                            │
+                 │  NL Parser: "pick up..." → single_arm,     │
+                 │             task_id=2                       │
+                 │                                            │
+                 │  30Hz Control Loop:                        │
+                 │    Camera (480×640 RGB) ──► ACT Model ──►  │
+                 │    Joint State (58-d)   ──►  (15.6M)  ──►  │
+                 │    Task Embedding       ──►           ──►  │
+                 │                         20 joint actions    │
+                 └────────────────┬───────────────────────────┘
+                                  │ Joint commands
+                 ┌────────────────▼───────────────────────────┐
+                 │  MuJoCo Simulation                         │
+                 │  Unitree G1 (29 DOF) + table + objects     │
+                 │  Egocentric camera → 480×640 RGB           │
+                 │  Physics: 500Hz (mj_step) / Kinematic      │
+                 └────────────────────────────────────────────┘
 ```
 
-The ACT model runs in a tight control loop: each frame, it receives a camera image + joint state + task instruction, and predicts the next 20 joint configurations (action chunking). Only the first action is executed, then the loop repeats.
+**Key insight:** The VLA model runs in a tight 30Hz control loop (camera → action). RosClaw/OpenClaw operates at the **task dispatch level** — it sends the command once and monitors completion.
 
 ---
 
@@ -36,58 +81,76 @@ The ACT model runs in a tight control loop: each frame, it receives a camera ima
 
 - **Ubuntu 24.04** (tested), or Ubuntu 22.04
 - **NVIDIA GPU** with CUDA (RTX 4050 6GB VRAM is sufficient)
-- **Python 3.12+**
+- **Python 3.12+**, **ROS2 Jazzy** (or Humble)
 
 ### Installation
 
 ```bash
-# 1. Clone the repository
+# 1. Clone
 git clone https://github.com/ozkanceylan/humanoid_vla.git
 cd humanoid_vla
 
-# 2. Install ROS2 (Jazzy on 24.04, Humble on 22.04)
+# 2. Install ROS2
 chmod +x install_ros2.sh && ./install_ros2.sh
 
-# 3. Install Python dependencies
+# 3. Python dependencies
 pip3 install --break-system-packages \
   mujoco opencv-python numpy h5py torch torchvision pynput
 
-# 4. Clone robot model repositories
+# 4. Robot models
 cd repos
 git clone https://github.com/unitreerobotics/unitree_mujoco
 git clone https://github.com/google-deepmind/mujoco_menagerie
 cd ..
 
 # 5. Build ROS2 workspace
-source /opt/ros/jazzy/setup.bash   # or humble
+source /opt/ros/jazzy/setup.bash
 cd ros2_ws && colcon build --symlink-install && cd ..
 source ros2_ws/install/setup.bash
 ```
 
-### Generate Training Data
+### Full Pipeline (Train → Evaluate → Demo)
 
 ```bash
-# Generate 80 scripted expert demos (20 per task: reach, grasp, pick, place)
+# 1. Generate training data (80 single-arm + 30 bimanual demos)
 MUJOCO_GL=egl python3 scripts/generate_demos.py --all-tasks --episodes 20
-```
+MUJOCO_GL=egl python3 scripts/generate_bimanual_demos.py --episodes 30
 
-### Train the ACT Model
-
-```bash
-# Train for 300 epochs (~84 min on RTX 4050)
+# 2. Train ACT models (~2.5 hours total on RTX 4050)
 python3 scripts/train_act.py --demos data/demos --epochs 300 --batch-size 32
+python3 scripts/train_bimanual.py --epochs 300
+
+# 3. Evaluate
+MUJOCO_GL=egl python3 scripts/evaluate.py --checkpoint data/checkpoints/best.pt --episodes 20
+MUJOCO_GL=egl python3 scripts/evaluate_bimanual.py --checkpoint data/bimanual_checkpoints/best.pt --episodes 20
+
+# 4. Interactive demos (opens MuJoCo viewer)
+python3 scripts/live_demo.py --checkpoint data/checkpoints/best.pt
+python3 scripts/live_bimanual.py --checkpoint data/bimanual_checkpoints/best.pt
+
+# 5. Record demo videos
+MUJOCO_GL=egl python3 scripts/record_demo_videos.py
 ```
 
-### Evaluate
+### Run via ROS2 (Natural Language Interface)
 
 ```bash
-# Run evaluation (20 episodes per task)
-MUJOCO_GL=egl python3 scripts/evaluate.py --checkpoint data/checkpoints/best.pt --episodes 20
+# Terminal 1: Launch full VLA system (task manager + rosbridge)
+ros2 launch vla_mujoco_bridge vla_system.launch.py
+
+# Terminal 2: Send natural language commands
+ros2 topic pub --once /vla/task_goal std_msgs/String "data: 'pick up the red cube'"
+ros2 topic pub --once /vla/task_goal std_msgs/String "data: 'pick up the green box with both hands'"
+
+# Terminal 3: Monitor status (JSON)
+ros2 topic echo /vla/status
 ```
 
 ---
 
 ## Evaluation Results
+
+### Single-Arm Manipulation (Phase C)
 
 Trained for 300 epochs (93 min on RTX 4050, final loss: 0.000009). Evaluated with temporal ensembling and hierarchical task decomposition:
 
@@ -96,102 +159,63 @@ Trained for 300 epochs (93 min on RTX 4050, final loss: 0.000009). Evaluated wit
 | **Reach** the red cube | 20/20 | **100%** |
 | **Grasp** the red cube | 18/20 | **90%** |
 | **Pick up** the red cube | 18/20 | **90%** |
-| **Place** the red cube on the blue plate | 13/20 | **65%** |
+| **Place** the red cube on blue plate | 13/20 | **65%** |
 | **Overall** | **69/80** | **86.2%** |
 
-Key inference techniques that bridge the train→eval gap:
-1. **Temporal ensembling** — re-plan every 5 steps, exponentially-weighted average of overlapping action chunks
-2. **Hierarchical task decomposition** — composite tasks use "grasp" embedding for approach, then switch to task-specific embedding
-3. **Re-grasp prevention** — `released` flag prevents auto-grasp from re-triggering after intentional release
+### Bimanual Physics-Based Grasping (Phase C2)
 
-> Training loss is meaningless for closed-loop evaluation. See [study/03](study/03_act_training_and_evaluation.md) §9 for the full debugging story.
-
-### Phase C2 — Bimanual Physics-Based Grasping
-
-A separate bimanual ACT model trained on physics-based box manipulation. Both hands squeeze a 20×15×15cm box using friction only (no weld constraints), with full `mj_step` dynamics, PD torque control, and gravity compensation.
+Both hands squeeze a 20×15×15cm box using friction only — no weld constraints, full `mj_step` dynamics, PD torque control + gravity compensation:
 
 | Metric | Value |
 |--------|-------|
 | **Success rate** | **20/20 (100%)** |
 | **Lift** | mean=8.5cm, min=6.5cm, max=10.4cm |
 | **Contact force** | L=13.6N, R=13.3N (bilateral) |
-| **Physics** | `mj_step` — real contact + friction |
+| **Physics** | `mj_step` at 500Hz, control at 30Hz |
 | **Training** | 300 epochs, 52 min, loss=0.000009 |
 
-```bash
-# Generate bimanual demos (30 episodes)
-MUJOCO_GL=egl python3 scripts/generate_bimanual_demos.py --episodes 30
+### Combined: 5 Tasks, 89/100 (89%)
 
-# Train bimanual ACT model
-python3 scripts/train_bimanual.py --epochs 300
-
-# Evaluate
-MUJOCO_GL=egl python3 scripts/evaluate_bimanual.py \
-    --checkpoint data/bimanual_checkpoints/best.pt --episodes 20
-
-# Live demo (interactive viewer with ACT model)
-python3 scripts/live_bimanual.py --checkpoint data/bimanual_checkpoints/best.pt
-
-# Live demo (scripted expert)
-python3 scripts/live_bimanual.py
-```
-
-→ **[Detailed study: Bimanual Physics Grasping](study/04_bimanual_physics_grasping.md)**
+Key inference techniques:
+1. **Temporal ensembling** — overlapping action chunks with exponential decay weighting
+2. **Hierarchical task decomposition** — composite tasks switch task embedding at grasp trigger
+3. **Re-grasp prevention** — `released` flag prevents re-triggering after intentional release
 
 ---
 
-## Project Structure
+## ROS2 Integration (Phase D)
 
-```
-humanoid_vla/
-├── README.md                          # ← You are here
-├── CLAUDE.md                          # Project vision & phase plan
-│
-├── sim/                               # MuJoCo simulation
-│   ├── g1_with_camera.xml             # Scene: G1 + table + cube + place marker
-│   ├── models/g1_29dof.xml            # Robot model (29 torque-actuated DOF)
-│   └── test_g1.py                     # Standalone sim test (viewer + camera)
-│
-├── scripts/                           # Training & evaluation pipeline
-│   ├── act_model.py                   # ACT policy architecture + dataset
-│   ├── train_act.py                   # Single-arm training loop
-│   ├── evaluate.py                    # Single-arm evaluation with success detection
-│   ├── generate_demos.py              # Single-arm scripted expert (IK + weld)
-│   ├── physics_sim.py                 # Physics wrapper (mj_step, PD, contacts)
-│   ├── generate_bimanual_demos.py     # Bimanual demo generator (friction grasp)
-│   ├── train_bimanual.py              # Bimanual ACT training
-│   ├── evaluate_bimanual.py           # Bimanual evaluation (contact + lift)
-│   ├── live_demo.py                   # Interactive viewer (single-arm ACT)
-│   ├── live_bimanual.py               # Interactive viewer (bimanual ACT/expert)
-│   ├── visualize_demo.py              # Record demo videos from HDF5
-│   └── convert_to_lerobot.py          # LeRobot format converter (optional)
-│
-├── ros2_ws/src/vla_mujoco_bridge/     # ROS2 package
-│   └── vla_mujoco_bridge/
-│       ├── mujoco_sim.py              # Physics engine wrapper + PD controller
-│       ├── bridge_node.py             # ROS2 ↔ MuJoCo bridge (topics/services)
-│       ├── teleop_node.py             # Full-body keyboard teleop
-│       ├── arm_teleop_node.py         # Arm-only keyboard teleop
-│       └── demo_recorder.py           # HDF5 demonstration recorder
-│
-├── data/                              # Generated data (gitignored)
-│   ├── demos/                         # Single-arm HDF5 episodes
-│   ├── checkpoints/                   # Single-arm model weights
-│   ├── bimanual_demos/                # Bimanual HDF5 episodes
-│   └── bimanual_checkpoints/          # Bimanual model weights
-│
-├── study/                             # Deep-dive study documents
-│   ├── 01_project_deep_dive.md        # Phase A+B architecture & concepts
-│   ├── 02_scripted_expert_demo_generation.md  # IK pipeline & kinematic playback
-│   └── 03_act_training_and_evaluation.md      # ACT model, training, Phase C
-│
-├── tasks/                             # Project management
-│   ├── todo.md                        # Phase tracker with milestones
-│   ├── lessons.md                     # Engineering lessons learned (L001–L023)
-│   └── ozkan_todo.md                  # Personal research notes
-│
-└── logs/                              # Training logs (for documentation)
-    └── act_training_300ep.log         # Terminal output from training run
+The VLA Task Manager accepts natural language commands via ROS2 topics and runs ACT inference in a closed-loop MuJoCo simulation.
+
+### ROS2 Interfaces
+
+| Direction | Topic | Type | Purpose |
+|-----------|-------|------|---------|
+| Subscribe | `/vla/task_goal` | `std_msgs/String` | Natural language command |
+| Publish | `/vla/status` | `std_msgs/String` | JSON: step, progress, result |
+| Publish | `/camera/image_raw` | `sensor_msgs/Image` | Ego camera during execution |
+
+### NL Command Examples
+
+| Input | Mode | Task |
+|-------|------|------|
+| "pick up the red cube" | single_arm | pick up the red cube |
+| "reach" | single_arm | reach the red cube |
+| "lift the box" | bimanual | pick up the green box with both hands |
+| "bimanual grasp" | bimanual | pick up the green box with both hands |
+
+### rosbridge (WebSocket for External Systems)
+
+The launch file co-starts rosbridge_server on port 9090, enabling any WebSocket client (RosClaw, JavaScript, Python) to send commands:
+
+```python
+import websocket, json
+ws = websocket.create_connection("ws://localhost:9090")
+ws.send(json.dumps({
+    "op": "publish",
+    "topic": "/vla/task_goal",
+    "msg": {"data": "pick up the red cube"}
+}))
 ```
 
 ---
@@ -201,17 +225,15 @@ humanoid_vla/
 | Property | Value |
 |----------|-------|
 | DOF | 29 torque-controlled joints |
-| Actuators | `<motor>` elements (torque input, not position servo) |
-| Control | PD controller: $\tau = K_p(q_{des} - q) - K_d\dot{q} + \tau_{gravity}$ |
-| Camera | Egocentric RGB, 480×640, mounted on torso |
-| Fixed-base | Pelvis frozen at z=0.793m (no balance needed) |
-| Right arm | 7 DOF (shoulder pitch/roll/yaw, elbow, wrist pitch/roll/yaw) |
+| Control | PD: $\tau = K_p(q_{des} - q) - K_d\dot{q} + \tau_{gravity}$ |
+| Camera | Egocentric RGB, 480×640, torso-mounted |
+| Fixed base | Pelvis frozen at z=0.793m |
+| Right arm | 7 DOF (shoulder pitch/roll/yaw, elbow, wrist p/r/y) |
+| Left arm | 7 DOF (mirror configuration) |
 
 ---
 
 ## Tasks
-
-The system supports 4 manipulation tasks, each with a natural language label:
 
 | ID | Task | Description | Success Criterion |
 |----|------|-------------|-------------------|
@@ -219,38 +241,101 @@ The system supports 4 manipulation tasks, each with a natural language label:
 | 1 | **Grasp** | Close hand around the cube | Auto-grasp triggered (hand < 4cm) |
 | 2 | **Pick** | Lift the cube off the table | Cube z > 0.90m while grasped |
 | 3 | **Place** | Move cube to the blue plate | Cube within 6cm of target, released |
+| 4 | **Bimanual Lift** | Lift green box with both hands | Box ≥3cm, dual contact, force ≥2N |
 
 ---
 
 ## ACT Model Architecture
 
 ```
-Image (480×640×3)──→ ResNet18 (frozen layers 0-6) ──→ AvgPool ──→ 512-d ──→ Proj ──→ 256-d ─┐
-                                                                                                │
-State (29 pos + 29 vel) ──→ MLP (58→256→256) ─────────────────────────────────────────────────│──→ Memory (3 tokens)
-                                                                                                │
-Task label ("pick up...") ──→ Embedding lookup ──→ 256-d ────────────────────────────────────┘
-                                                                                  │
-                                                                    ┌─────────────▼──────────────┐
-                                                                    │  Transformer Decoder        │
-                                                                    │  4 layers, 4 heads, d=256   │
-                                                                    │  20 learnable query tokens   │
-                                                                    └─────────────┬──────────────┘
-                                                                                  │
-                                                                    Linear(256, 29) × 20 steps
-                                                                                  │
-                                                                    Action chunk: (20, 29) joint positions
+Image (480×640×3) ──► ResNet18 (frozen 0-6) ──► AvgPool ──► 512-d ──► Proj ──► 256-d ─┐
+                                                                                         │
+State (pos + vel) ──► MLP (→256→256) ──────────────────────────────────────────────────│──► Memory
+                                                                                         │    (3 tokens)
+Task ("pick up..") ──► Embedding ──► 256-d ────────────────────────────────────────────┘
+                                                                              │
+                                                                ┌─────────────▼──────────────┐
+                                                                │  Transformer Decoder        │
+                                                                │  4 layers, 4 heads, d=256   │
+                                                                │  20 learnable query tokens   │
+                                                                └─────────────┬──────────────┘
+                                                                              │
+                                                                Action chunk: (20, action_dim)
 ```
 
-| Component | Detail |
-|-----------|--------|
-| Total params | 15.6M |
-| Trainable params | 12.8M (ResNet frozen except layer4) |
-| Chunk size | 20 timesteps (~0.67s lookahead) |
-| Training | AdamW (lr=1e-4), CosineAnnealing, MSE loss |
-| VRAM usage | ~1.5 GB at batch_size=32 |
+| Variant | Params | Trainable | State | Actions | Tasks |
+|---------|--------|-----------|-------|---------|-------|
+| Single-arm | 15.6M | 12.8M | 58 (29+29) | 29 | 4 |
+| Bimanual | 15.6M | 12.8M | 28 (14+14) | 14 | 1 |
 
-→ **[Detailed study: ACT Training & Evaluation](study/03_act_training_and_evaluation.md)**
+Chunk size: 20 timesteps (~0.67s). Training: AdamW (lr=1e-4), CosineAnnealing, MSE loss. VRAM: ~1.5GB.
+
+---
+
+## Project Structure
+
+```
+humanoid_vla/
+├── README.md                          # This file
+├── CLAUDE.md                          # Project vision & phase plan
+│
+├── sim/                               # MuJoCo simulation
+│   ├── g1_with_camera.xml             # Scene: G1 + table + objects + cameras
+│   ├── models/g1_29dof.xml            # Robot model (29 torque-actuated DOF)
+│   └── test_g1.py                     # Standalone sim test
+│
+├── scripts/                           # Training & evaluation pipeline
+│   ├── act_model.py                   # ACT policy architecture + dataset
+│   ├── train_act.py                   # Single-arm training
+│   ├── train_bimanual.py              # Bimanual training
+│   ├── evaluate.py                    # Single-arm evaluation
+│   ├── evaluate_bimanual.py           # Bimanual evaluation (contact + lift)
+│   ├── generate_demos.py              # Single-arm scripted expert (IK + weld)
+│   ├── generate_bimanual_demos.py     # Bimanual demo generator (friction)
+│   ├── physics_sim.py                 # Physics wrapper (mj_step, PD, contacts)
+│   ├── live_demo.py                   # Interactive viewer (single-arm)
+│   ├── live_bimanual.py               # Interactive viewer (bimanual)
+│   ├── record_demo_videos.py          # Generate demo clips for README
+│   ├── visualize_demo.py              # Render videos from HDF5 demos
+│   └── convert_to_lerobot.py          # LeRobot format converter
+│
+├── ros2_ws/src/vla_mujoco_bridge/     # ROS2 package
+│   ├── vla_mujoco_bridge/
+│   │   ├── task_manager_node.py       # VLA Task Manager (NL → ACT → MuJoCo)
+│   │   ├── bridge_node.py             # Low-level MuJoCo ↔ ROS2 bridge
+│   │   ├── mujoco_sim.py              # Physics engine wrapper
+│   │   ├── teleop_node.py             # Full-body keyboard teleop
+│   │   ├── arm_teleop_node.py         # Arm-only keyboard teleop
+│   │   └── demo_recorder.py           # HDF5 demonstration recorder
+│   └── launch/
+│       └── vla_system.launch.py       # Launch: rosbridge + task manager
+│
+├── media/                             # Demo videos (committed to repo)
+│   ├── reach.mp4, grasp.mp4           # Individual task demos
+│   ├── pick.mp4, place.mp4            # Pick and place demos
+│   ├── bimanual.mp4                   # Bimanual box lift demo
+│   └── all_tasks.mp4                  # Combined montage
+│
+├── data/                              # Generated data (gitignored)
+│   ├── demos/                         # Single-arm HDF5 episodes
+│   ├── checkpoints/                   # Single-arm model weights
+│   ├── bimanual_demos/                # Bimanual HDF5 episodes
+│   └── bimanual_checkpoints/          # Bimanual model weights
+│
+├── study/                             # Deep-dive study documents
+│   ├── 01_project_deep_dive.md        # MuJoCo, G1, ROS2, camera pipeline
+│   ├── 02_scripted_expert_demo_generation.md  # IK, kinematic playback
+│   ├── 03_act_training_and_evaluation.md      # ACT training, debugging
+│   ├── 04_bimanual_physics_grasping.md        # Physics, PD, friction grasp
+│   └── 05_system_integration.md       # Task Manager, rosbridge, NL parsing
+│
+├── tasks/                             # Project management
+│   ├── todo.md                        # Phase tracker with milestones
+│   └── lessons.md                     # Engineering lessons (L001-L031)
+│
+└── logs/                              # Training logs
+    └── act_training_300ep.log
+```
 
 ---
 
@@ -258,41 +343,36 @@ Task label ("pick up...") ──→ Embedding lookup ──→ 256-d ───�
 
 ### Study Documents (Deep Dives)
 
-These are detailed study guides covering every concept, with code walkthroughs, math derivations, and engineering decisions:
-
-| # | Document | Topics Covered |
-|---|----------|----------------|
-| 01 | [Project Deep Dive](study/01_project_deep_dive.md) | MuJoCo fundamentals, G1 robot, MJCF XML, PD control, gravity compensation, ROS2 bridge, threading, camera pipeline, teleoperation, HDF5 format |
-| 02 | [Scripted Expert Demos](study/02_scripted_expert_demo_generation.md) | Inverse kinematics (iterative Jacobian), kinematic playback, weld constraint enforcement, reach/grasp/pick trajectory design |
-| 03 | [ACT Training & Evaluation](study/03_act_training_and_evaluation.md) | ACT architecture, action chunking, ResNet18 visual encoder, task embedding, Transformer decoder, training pipeline, loss curves, evaluation with auto-grasp/release, success metrics |
-| 04 | [Bimanual Physics Grasping](study/04_bimanual_physics_grasping.md) | mj_step vs mj_forward, PD torque control, contact physics, friction cones, compliance grasping, bimanual coordination, joint freezing, bimanual ACT model |
+| # | Document | Topics |
+|---|----------|--------|
+| 01 | [Project Deep Dive](study/01_project_deep_dive.md) | MuJoCo fundamentals, G1 robot, MJCF XML, PD control, gravity comp, ROS2 bridge, threading, camera pipeline, teleoperation, HDF5 format |
+| 02 | [Scripted Expert Demos](study/02_scripted_expert_demo_generation.md) | Inverse kinematics (iterative Jacobian), kinematic playback, weld constraint, trajectory design |
+| 03 | [ACT Training & Evaluation](study/03_act_training_and_evaluation.md) | ACT architecture, action chunking, ResNet18 encoder, task embedding, Transformer decoder, training, evaluation debugging |
+| 04 | [Bimanual Physics Grasping](study/04_bimanual_physics_grasping.md) | mj_step vs mj_forward, PD torque control, contact physics, friction cones, compliance grasping, bimanual coordination |
+| 05 | [System Integration](study/05_system_integration.md) | ROS2 Task Manager, NL parsing, rosbridge WebSocket, thread-safe execution, temporal ensembling, full data flow |
 
 ### Engineering Lessons
 
-[tasks/lessons.md](tasks/lessons.md) — 31 concise lessons learned during development:
-- L001–L008: Environment setup (torque actuators, meshdir, ROS2 Jazzy, pip on 24.04)
-- L009–L012: Phase B infrastructure (gravity comp, setuptools regression, cv_bridge crash)
-- L013–L016: Demo generation (ctrlrange vs jnt_range, arm reach, kinematic IK, manual weld)
-- L017–L023: ACT training & Phase C (standalone training, action chunking, frozen ResNet, auto-grasp eval)
-- L024–L027: Evaluation (temporal ensembling, hierarchical decomposition, re-grasp prevention, kinematic gravity)
-- L028–L031: Bimanual physics (leg drift freeze, palm pad collision, position-only IK, box rotation)
-
-### Task Tracker
-
-[tasks/todo.md](tasks/todo.md) — Detailed milestone tracker for all phases (A through C).
+[tasks/lessons.md](tasks/lessons.md) — 31 concise lessons learned:
+- L001–L008: Environment setup (torque actuators, meshdir, ROS2 Jazzy)
+- L009–L012: Phase B infrastructure (gravity comp, setuptools, cv_bridge)
+- L013–L016: Demo generation (ctrlrange, arm reach, kinematic IK, weld)
+- L017–L023: ACT training (standalone, action chunking, frozen ResNet, auto-grasp)
+- L024–L027: Evaluation (temporal ensembling, hierarchical decomposition, re-grasp)
+- L028–L031: Bimanual physics (leg drift freeze, palm pad, IK, box rotation)
 
 ---
 
 ## Development Phases
 
-| Phase | Status | Summary |
-|-------|--------|---------|
-| **A** — Sim + ROS2 | ✅ Complete | MuJoCo + G1 + camera + ROS2 bridge + teleop |
-| **B** — VLA Training | ✅ Complete | Fixed-base manipulation, scripted demos, ACT training |
-| **C** — Multi-step | ✅ Complete | Place task, 4-task training, evaluation |
-| **C2** — Bimanual | ✅ Complete | Physics-based grasping, friction-only lift, 100% eval |
-| **D** — RosClaw | 🔲 Planned | Telegram integration via RosClaw + OpenClaw |
-| **E** — Polish | 🔲 Planned | Multi-task demo, documentation, video |
+| Phase | Status | Duration | Summary |
+|-------|--------|----------|---------|
+| **A** — Sim + ROS2 | ✅ | 2 weeks | MuJoCo + G1 + camera + ROS2 bridge + teleop |
+| **B** — Demo Generation | ✅ | 1 week | Scripted expert demos, IK pipeline, 80 episodes |
+| **C** — ACT Training | ✅ | 2 weeks | 4-task ACT model, 86.2% success rate |
+| **C2** — Bimanual | ✅ | 2 weeks | Physics-based bimanual grasping, 100% success |
+| **D** — Integration | ✅ | 1 week | ROS2 Task Manager, NL commands, rosbridge |
+| **E** — Polish | ✅ | 1 week | Demo videos, documentation, study docs |
 
 ---
 
@@ -304,6 +384,7 @@ These are detailed study guides covering every concept, with code walkthroughs, 
 | RAM | 16 GB | 33 GB |
 | OS | Ubuntu 22.04 or 24.04 | Ubuntu 24.04 |
 | CUDA | 12.x | 12.8 |
+| ROS2 | Humble or Jazzy | Jazzy |
 
 ---
 
@@ -312,7 +393,6 @@ These are detailed study guides covering every concept, with code walkthroughs, 
 ### Papers
 - **ACT:** Zhao et al., "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware", RSS 2023
 - **GR00T N1:** NVIDIA, "An Open Foundation Model for Humanoid Robots", 2025
-- **ACG:** "Action Coherence Guidance for VLA Models", ICRA 2026
 
 ### Repositories
 - [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) — G1/H1 simulation

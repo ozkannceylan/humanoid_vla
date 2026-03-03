@@ -88,6 +88,14 @@ class LivePhysicsSim:
         self.right_palm_geom_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_GEOM, "right_palm_pad")
 
+        # Hide red cube and place marker — not used in bimanual sim.
+        for name in ("cube_geom", "place_marker"):
+            gid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+            if gid >= 0:
+                self.model.geom_rgba[gid, 3] = 0.0
+                self.model.geom_contype[gid] = 0
+                self.model.geom_conaffinity[gid] = 0
+
         # Arm joint addresses
         self.left_arm_qpos_adr = np.array([
             self.model.jnt_qposadr[self.model.actuator_trnid[ci, 0]]

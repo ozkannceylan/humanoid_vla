@@ -3,7 +3,7 @@
 <package format="3">
   <name>vla_mujoco_bridge</name>
   <version>0.1.0</version>
-  <description>MuJoCo-ROS2 bridge for Unitree G1 simulation (Phase A)</description>
+  <description>MuJoCo-ROS2 bridge + VLA Task Manager for Unitree G1 simulation</description>
   <maintainer email="ozkannceylan@gmail.com">Ozkan Ceylan</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,6 +11,10 @@
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
   <depend>cv_bridge</depend>
+  <depend>std_srvs</depend>
+  <depend>geometry_msgs</depend>
+
+  <exec_depend>rosbridge_server</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>

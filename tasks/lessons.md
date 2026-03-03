@@ -275,3 +275,55 @@ force without a force controller. The PD controller pushes toward the unreachabl
 the contact constraint pushes back, and equilibrium produces 13-14N bilateral force.
 **Rule:** For friction grasping, command hand targets 2-3cm inside the object surface.
 Force magnitude is proportional to penetration depth × Kp gain.
+
+---
+
+# Phase D — Lessons Learned
+
+---
+
+## L034: Use std_msgs/String + JSON instead of custom ROS2 action interfaces
+**Discovery:** Custom ROS2 action definitions require a separate ament_cmake interfaces
+package with rosidl_generate_interfaces. For a Python-only project, this adds significant
+build complexity (cmake, message generation, cross-package dependencies).
+**Rule:** For simple task dispatch (command → result), use String topics with JSON payloads.
+Compatible with rosbridge out of the box. Only create custom interfaces when you need
+action server goal/cancel semantics.
+
+## L035: Run VLA inference in a separate daemon thread, not the ROS2 callback
+**Discovery:** ACT inference takes ~8 seconds (250 steps). Running in the ROS2 callback
+blocks the executor — no other callbacks (like status publishing) can run.
+**Rule:** Spawn a daemon thread for long-running inference. Use a mutex lock to prevent
+concurrent tasks. The thread can still call ROS2 publishers from within.
+
+## L036: Self-contained sim per inference (not shared with bridge_node)
+**Discovery:** The task manager creates its own MuJoCo sim instance rather than sharing
+with bridge_node. This ensures clean state per task, simpler error recovery, and no
+coordination needed between nodes.
+**Rule:** For VLA inference, embed the sim directly in the inference loop. The ~100ms
+overhead of creating a new sim is negligible for 8-second tasks.
+
+## L037: Lazy imports for heavy modules (PhysicsSim, SimWrapper)
+**Discovery:** Importing PhysicsSim creates a MuJoCo model and renderer at module load
+time. If the task manager only needs single-arm mode, importing PhysicsSim wastes ~200ms
+and memory.
+**Rule:** Use lazy imports with a global cache. Load physics_sim only when a bimanual
+task arrives.
+
+## L038: MUJOCO_GL=egl must be set via additional_env in launch files
+**Discovery:** When launching via `ros2 launch`, environment variables from the parent
+shell are NOT always propagated to child nodes. Setting MUJOCO_GL in the launch file's
+`additional_env` parameter ensures headless rendering works.
+**Rule:** Always set MUJOCO_GL=egl explicitly in launch files for headless GPU rendering.
+
+## L039: rosbridge_server exposes ALL ROS2 topics — no filtering by default
+**Discovery:** rosbridge_server forwards every topic/service to WebSocket clients.
+This means `/joint_states` (100Hz), `/camera/image_raw` (30Hz), etc. are all accessible.
+**Rule:** When using rosbridge, be aware of bandwidth. Use `throttle_rate` in subscribe
+requests to limit data flow to external clients.
+
+## L040: Keep demo videos under 5MB each for GitHub embedding
+**Discovery:** GitHub renders `<video>` tags in README markdown, but large files slow
+page loads. At 15fps with 640×480 side-by-side, a 10-second clip is ~1MB with mp4v codec.
+**Rule:** Target 1-2MB per clip. Use 15fps not 30fps, capture every other sim step,
+keep episodes under 10 seconds.

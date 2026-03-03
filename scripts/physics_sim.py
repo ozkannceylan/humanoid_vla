@@ -117,6 +117,18 @@ class PhysicsSim:
         self.cube_body_id = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_BODY, "red_cube")
 
+        # Hide red cube and place marker — not used in bimanual sim.
+        # Set alpha=0 (invisible) and disable collision so they don't interfere.
+        cube_geom_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_GEOM, "cube_geom")
+        place_geom_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_GEOM, "place_marker")
+        for gid in (cube_geom_id, place_geom_id):
+            if gid >= 0:
+                self.model.geom_rgba[gid, 3] = 0.0       # invisible
+                self.model.geom_contype[gid] = 0          # no collision
+                self.model.geom_conaffinity[gid] = 0
+
         # Arm joint qpos addresses and limits
         self.left_arm_qpos_adr = np.array([
             self.model.jnt_qposadr[self.model.actuator_trnid[ci, 0]]
