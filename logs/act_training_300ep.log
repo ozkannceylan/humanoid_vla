@@ -1,0 +1,75 @@
+============================================================
+ACT Training — 300 Epochs on RTX 4050 (6GB VRAM)
+Date: 2026-03-03
+Dataset: 80 episodes (20×4 tasks), 9000 samples
+============================================================
+
+Configuration:
+  Dataset:    9000 samples from data/demos
+  Epochs:     300
+  Batch size: 32
+  Chunk size: 20
+  LR:         0.0001
+  Device:     cuda
+  Model:      15.6M total, 12.8M trainable
+  Output:     /home/ozkan/projects/humanoid_vla/data/checkpoints
+  Batches/ep: 281
+  Est. time:  ~84 min (actual: 93.3 min)
+
+Loss Curve:
+  Epoch    0/300 — loss: 0.010948 — lr: 1.00e-04 — 19s elapsed
+  Epoch   20/300 — loss: 0.000192 — lr: 9.88e-05 — 392s elapsed
+  Epoch   40/300 — loss: 0.000090 — lr: 9.55e-05 — 765s elapsed
+  Epoch   60/300 — loss: 0.000060 — lr: 9.02e-05 — 1137s elapsed
+  Epoch   80/300 — loss: 0.000045 — lr: 8.32e-05 — 1510s elapsed
+  Epoch  100/300 — loss: 0.000033 — lr: 7.48e-05 — 1883s elapsed
+  Epoch  120/300 — loss: 0.000028 — lr: 6.53e-05 — 2257s elapsed
+  Epoch  140/300 — loss: 0.000021 — lr: 5.52e-05 — 2630s elapsed
+  Epoch  160/300 — loss: 0.000017 — lr: 4.48e-05 — 3003s elapsed
+  Epoch  180/300 — loss: 0.000014 — lr: 3.47e-05 — 3377s elapsed
+  Epoch  200/300 — loss: 0.000012 — lr: 2.53e-05 — 3750s elapsed
+  Epoch  220/300 — loss: 0.000011 — lr: 1.70e-05 — 4124s elapsed
+  Epoch  240/300 — loss: 0.000010 — lr: 1.02e-05 — 4498s elapsed
+  Epoch  260/300 — loss: 0.000009 — lr: 5.07e-06 — 4871s elapsed
+  Epoch  280/300 — loss: 0.000009 — lr: 1.98e-06 — 5245s elapsed
+  Epoch  299/300 — loss: 0.000009 — lr: 1.00e-06 — 5600s elapsed
+
+Training complete in 93.3 min
+  Best loss: 0.000009
+  Checkpoints: /home/ozkan/projects/humanoid_vla/data/checkpoints
+
+Loss reduction: 0.010948 → 0.000009 = 1216× decrease
+Convergence: loss plateaus ~epoch 240 (cosine LR at 1e-5)
+
+============================================================
+Evaluation Results — 20 episodes per task
+============================================================
+Date: 2026-03-03
+Checkpoint: data/checkpoints/best.pt (epoch 299, loss 0.000009)
+Max steps: 250, chunk_exec=5, ensemble_k=0.01
+
+Inference techniques:
+  1. Temporal ensembling (ACT paper): re-plan every 5 steps,
+     exponentially-weighted average of overlapping action chunks
+  2. Hierarchical task decomposition: composite tasks (pick, place)
+     first use "grasp" embedding to approach, switch to task-specific
+     embedding after auto-grasp triggers
+  3. Auto-release for place: hand_z < target_z + 0.12 && cube_xy < 6cm
+  4. Gravity simulation: after release in kinematic mode, drop cube to table
+
+Results:
+  ✓ reach the red cube                 — 20/20 (100.0%) — avg_d=0.011
+  ✓ grasp the red cube                 — 18/20 ( 90.0%) — avg_d=0.005
+  ✓ pick up the red cube               — 18/20 ( 90.0%) — avg_d=0.004
+  ✓ place the red cube on the blue plate — 13/20 ( 65.0%) — avg_d=0.031
+  ──────────────────────────────────────────────────────────
+  Overall: 69/80 (86.2%)
+
+  ✅ Phase B criterion met: reach success = 100% ≥ 50%
+  ✅ Full demo criterion met: 3+ tasks > 80% (reach 100%, grasp 90%, pick 90%)
+
+Key debugging insights:
+  - Without temporal ensembling: 0% reach (compounding error)
+  - Without hierarchical decomposition: 0% pick (model averages approach+lift phases)
+  - Without re-grasp prevention: 0% place (auto-grasp re-triggers after release)
+  - Without gravity simulation: 0% place (cube stays in mid-air after release)

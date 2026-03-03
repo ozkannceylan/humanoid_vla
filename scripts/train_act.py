@@ -2,165 +2,218 @@
 """
 scripts/train_act.py
 
-Train an ACT (Action Chunking with Transformers) policy on collected demos
-using HuggingFace LeRobot's training script.
-
-ACT paper: "Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware"
-           Zhao et al., 2023 — https://arxiv.org/abs/2304.13705
+Standalone ACT training — reads HDF5 demos directly, trains an ACT policy,
+saves checkpoints. No LeRobot dependency needed for training.
 
 Usage:
-  # Make sure lerobot is installed first:
-  pip3 install --break-system-packages lerobot
-
-  # Convert your demos first:
-  python3 scripts/convert_to_lerobot.py
-
-  # Then train:
-  python3 scripts/train_act.py --dataset data/lerobot_dataset
+  cd ~/projects/humanoid_vla
+  python3 scripts/train_act.py                               # defaults: 300 epochs
+  python3 scripts/train_act.py --epochs 1000 --batch-size 16 # longer training
+  python3 scripts/train_act.py --resume data/checkpoints/latest.pt
 
 Training on RTX 4050 (6GB VRAM):
-  - ACT ~50M params fits in 6GB with batch_size=8
-  - Typical training: 50k-100k steps, ~2-4 hours
-  - Eval every 5000 steps on 10 rollouts
+  - ACT model: ~6M trainable params, ~1.5 GB VRAM at batch_size=32
+  - 300 epochs ≈ 40 min, 1000 epochs ≈ 2.2 hours
+  - Loss should drop below 0.001 for good convergence
 """
 
 import argparse
-import subprocess
+import os
 import sys
-import json
+import time
 from pathlib import Path
 
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
-# ----- ACT hyperparameters tuned for RTX 4050 / G1 arm manipulation ------
-# Adjust these if training diverges or OOM occurs.
-
-ACT_OVERRIDES = [
-    "policy=act",
-    "policy.chunk_size=100",            # action chunking window (ACT default)
-    "policy.n_action_steps=100",
-    "policy.input_shapes.observation.state=[58]",  # 29 pos + 29 vel
-    "policy.output_shapes.action=[29]",
-    "policy.vision_backbone=resnet18",
-    "policy.pretrained_backbone_weights=ResNet18_Weights.IMAGENET1K_V1",
-    "policy.use_separate_rgb_encoder_per_camera=false",
-    "training.batch_size=8",            # safe for 6GB VRAM
-    "training.lr=1e-5",
-    "training.num_epochs=5000",
-    "training.eval_freq=500",
-    "training.save_freq=1000",
-    "training.log_freq=50",
-    "eval.n_episodes=10",
-    "device=cuda",
-]
+# Local imports
+sys.path.insert(0, os.path.dirname(__file__))
+from act_model import ACTPolicy, DemoDataset, TASK_LABELS
 
 
-def check_dataset(dataset_path: Path) -> dict:
-    info_path = dataset_path / "meta" / "info.json"
-    if not info_path.exists():
-        raise SystemExit(
-            f"Dataset not found at {dataset_path}\n"
-            "Run: python3 scripts/convert_to_lerobot.py"
-        )
-    with open(info_path) as f:
-        return json.load(f)
+def count_params(model):
+    """Count trainable and total parameters."""
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total, trainable
 
 
-def check_lerobot():
-    try:
-        import lerobot  # noqa: F401
-        return True
-    except ImportError:
-        return False
+def save_checkpoint(model, optimizer, epoch, loss, path, config):
+    """Save training checkpoint with model config for standalone loading."""
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epoch,
+        'loss': loss,
+        'config': config,
+    }, path)
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--dataset",
-        default="data/lerobot_dataset",
-        help="Path to LeRobot-format dataset (output of convert_to_lerobot.py)",
-    )
-    parser.add_argument(
-        "--output",
-        default="data/act_training",
-        help="Directory for training outputs (checkpoints, logs, evals)",
-    )
-    parser.add_argument(
-        "--resume",
-        default="",
-        help="Path to checkpoint directory to resume training from",
-    )
-    parser.add_argument(
-        "--steps",
-        type=int,
-        default=100_000,
-        help="Total gradient steps (default: 100k, ~2-4h on RTX 4050)",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=8,
-        help="Batch size (reduce to 4 if OOM)",
-    )
+    parser = argparse.ArgumentParser(description="Train ACT policy on HDF5 demos")
+    parser.add_argument("--demos", default="data/demos",
+                        help="Directory with episode_NNNN.hdf5 files")
+    parser.add_argument("--output", default="data/checkpoints",
+                        help="Output directory for checkpoints")
+    parser.add_argument("--epochs", type=int, default=300,
+                        help="Training epochs (300 ≈ 40 min on RTX 4050)")
+    parser.add_argument("--batch-size", type=int, default=32,
+                        help="Batch size (reduce to 16 if OOM)")
+    parser.add_argument("--lr", type=float, default=1e-4,
+                        help="Initial learning rate")
+    parser.add_argument("--chunk-size", type=int, default=20,
+                        help="Action chunk length (predict N steps ahead)")
+    parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--log-freq", type=int, default=10,
+                        help="Print loss every N epochs")
+    parser.add_argument("--save-freq", type=int, default=100,
+                        help="Save checkpoint every N epochs")
+    parser.add_argument("--resume", default="",
+                        help="Path to checkpoint to resume from")
+    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
-    dataset_path = Path(args.dataset)
-    info = check_dataset(dataset_path)
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n=== ACT Training ===")
-    print(f"Dataset : {dataset_path.absolute()}")
-    print(f"  Episodes : {info['total_episodes']}")
-    print(f"  Frames   : {info['total_frames']}")
-    print(f"Output  : {Path(args.output).absolute()}")
-    print(f"Steps   : {args.steps}")
-    print(f"Batch   : {args.batch_size}")
+    # ── Dataset ──
+    dataset = DemoDataset(args.demos, chunk_size=args.chunk_size)
+    loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,        # data is preloaded in RAM, no need for workers
+        pin_memory=True,
+        drop_last=True,
+    )
 
-    if not check_lerobot():
-        print(
-            "\n[ERROR] LeRobot is not installed.\n"
-            "Install it with:\n"
-            "  pip3 install --break-system-packages lerobot\n"
-            "\nThen re-run this script."
-        )
-        sys.exit(1)
+    # ── Model ──
+    config = {
+        'state_dim': 58,
+        'action_dim': 29,
+        'chunk_size': args.chunk_size,
+        'hidden_dim': args.hidden_dim,
+        'nhead': 4,
+        'num_layers': args.num_layers,
+        'num_tasks': len(TASK_LABELS),
+        'task_labels': TASK_LABELS,
+    }
 
-    # Build lerobot training command
-    run_dir = str(Path(args.output).absolute())
-    overrides = [
-        f"dataset_repo_id={dataset_path.absolute()}",
-        f"hydra.run.dir={run_dir}",
-        f"training.num_epochs={args.steps}",   # lerobot uses epochs but maps to steps
-        f"training.batch_size={args.batch_size}",
-    ] + ACT_OVERRIDES
+    model = ACTPolicy(
+        state_dim=config['state_dim'],
+        action_dim=config['action_dim'],
+        chunk_size=config['chunk_size'],
+        hidden_dim=config['hidden_dim'],
+        nhead=config['nhead'],
+        num_layers=config['num_layers'],
+        num_tasks=config['num_tasks'],
+    ).to(args.device)
 
+    total_params, trainable_params = count_params(model)
+
+    # ── Optimizer + Scheduler ──
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+        weight_decay=1e-4,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.epochs, eta_min=1e-6
+    )
+
+    start_epoch = 0
+
+    # ── Resume ──
     if args.resume:
-        overrides.append(f"resume=true")
-        overrides.append(f"resume_path={args.resume}")
+        print(f"Resuming from {args.resume}")
+        ckpt = torch.load(args.resume, map_location=args.device, weights_only=False)
+        model.load_state_dict(ckpt['model_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        start_epoch = ckpt['epoch'] + 1
+        print(f"  Resumed at epoch {start_epoch}, loss was {ckpt['loss']:.6f}")
 
-    cmd = [sys.executable, "-m", "lerobot.scripts.train"] + overrides
+    # ── Print summary ──
+    print(f"\n{'='*60}")
+    print(f"ACT Training")
+    print(f"{'='*60}")
+    print(f"  Dataset:    {len(dataset)} samples from {args.demos}")
+    print(f"  Epochs:     {args.epochs}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Chunk size: {args.chunk_size}")
+    print(f"  LR:         {args.lr}")
+    print(f"  Device:     {args.device}")
+    print(f"  Model:      {total_params/1e6:.1f}M total, "
+          f"{trainable_params/1e6:.1f}M trainable")
+    print(f"  Output:     {output_dir.absolute()}")
+    batches_per_epoch = len(loader)
+    est_time = args.epochs * batches_per_epoch * 0.06 / 60  # ~60ms/batch
+    print(f"  Batches/ep: {batches_per_epoch}")
+    print(f"  Est. time:  ~{est_time:.0f} min")
+    print(f"{'='*60}\n")
 
-    print(f"\nLaunching:\n  {' '.join(cmd[:5])} ...")
-    print("  (Training logs will appear below. Ctrl+C to interrupt.)\n")
+    # ── Training loop ──
+    best_loss = float('inf')
+    t0 = time.time()
 
-    try:
-        result = subprocess.run(cmd, check=False)
-        if result.returncode != 0:
-            print(f"\n[ERROR] Training exited with code {result.returncode}")
-            print(
-                "Common fixes:\n"
-                "  OOM     → reduce --batch_size to 4 or 2\n"
-                "  Dataset → check data/lerobot_dataset/meta/info.json exists\n"
-                "  Videos  → ensure ffmpeg is installed: sudo apt install -y ffmpeg"
-            )
-        else:
-            print(f"\nTraining complete. Checkpoints in: {run_dir}")
-            print(
-                "\nNext step: evaluate the policy\n"
-                "  ros2 run vla_mujoco_bridge vla_node --ros-args \\\n"
-                f"    -p checkpoint:={run_dir}/checkpoints/last/pretrained_model"
-            )
-    except KeyboardInterrupt:
-        print("\nTraining interrupted.")
+    for epoch in range(start_epoch, args.epochs):
+        model.train()
+        epoch_loss = 0.0
+        n_batches = 0
+
+        for images, states, task_ids, action_chunks in loader:
+            images = images.to(args.device)
+            states = states.to(args.device)
+            task_ids = task_ids.to(args.device, dtype=torch.long)
+            action_chunks = action_chunks.to(args.device)
+
+            # Forward
+            pred = model(images, states, task_ids)    # (B, chunk, 29)
+            loss = F.mse_loss(pred, action_chunks)
+
+            # Backward
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            epoch_loss += loss.item()
+            n_batches += 1
+
+        scheduler.step()
+        avg_loss = epoch_loss / max(n_batches, 1)
+
+        # Logging
+        if epoch % args.log_freq == 0 or epoch == args.epochs - 1:
+            elapsed = time.time() - t0
+            lr_now = scheduler.get_last_lr()[0]
+            print(f"  Epoch {epoch:4d}/{args.epochs} — "
+                  f"loss: {avg_loss:.6f} — lr: {lr_now:.2e} — "
+                  f"{elapsed:.0f}s elapsed")
+
+        # Save checkpoint
+        if (epoch > 0 and epoch % args.save_freq == 0) or epoch == args.epochs - 1:
+            ckpt_path = output_dir / f"checkpoint_{epoch:04d}.pt"
+            save_checkpoint(model, optimizer, epoch, avg_loss, ckpt_path, config)
+
+            # Also save as 'latest.pt'
+            latest_path = output_dir / "latest.pt"
+            save_checkpoint(model, optimizer, epoch, avg_loss, latest_path, config)
+
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                best_path = output_dir / "best.pt"
+                save_checkpoint(model, optimizer, epoch, avg_loss, best_path, config)
+
+    total_time = time.time() - t0
+    print(f"\nTraining complete in {total_time/60:.1f} min")
+    print(f"  Best loss: {best_loss:.6f}")
+    print(f"  Checkpoints: {output_dir.absolute()}")
+    print(f"\nNext step: evaluate the model")
+    print(f"  MUJOCO_GL=egl python3 scripts/evaluate.py "
+          f"--checkpoint {output_dir}/best.pt")
 
 
 if __name__ == "__main__":

@@ -42,6 +42,12 @@
          Table top at z=0.8 (half-height 0.4, pos 0 0 0.4). -->
     <body name="table" pos="0.3 -0.1 0">
       <geom type="box" size="0.2 0.2 0.4" pos="0 0 0.4" rgba="0.6 0.4 0.2 1"/>
+      <!-- Phase C: place target — blue circle marker on table surface.
+           World position: (0.3-0.1, -0.1+0.1, 0.802) = (0.2, 0.0, 0.802).
+           contype/conaffinity=0 so it doesn't interfere with physics. -->
+      <geom name="place_marker" type="cylinder" size="0.04 0.002" pos="-0.1 0.1 0.802"
+            rgba="0.2 0.2 0.9 1" contype="0" conaffinity="0"/>
+      <site name="place_site" pos="-0.1 0.1 0.825" size="0.005" rgba="0 0 0 0"/>
     </body>
 
     <!-- Red cube on table — Phase B manipulation target.

@@ -132,3 +132,96 @@ During "pick" demos, hand lifted but cube stayed on the table.
 **Fix:** After `mj_forward`, check `data.eq_active[weld_id]` and if active, set
 `data.qpos[cube_qpos_adr:+3] = data.site_xpos[hand_site_id]` then call `mj_forward` again.
 **Rule:** When using kinematic mode, manually enforce equality constraints by updating qpos.
+
+## L017: Standalone ACT training is more reliable than LeRobot CLI wrapping
+**Discovery:** LeRobot v0.4.4 uses Hydra configs and expects HuggingFace-format datasets
+(parquet + mp4 video + specific metadata files). Wrapping the training CLI with overrides
+is fragile and hard to debug.
+**Fix:** Wrote standalone ACT training (`act_model.py` + `train_act.py`) that reads HDF5
+demos directly, trains with PyTorch, and saves checkpoints with model config.
+**Rule:** For small-scale research, standalone training loops beat framework wrappers.
+More control, better debugging, and no format-conversion surprises.
+
+## L018: Action chunking handles deterministic demos well without CVAE
+**Discovery:** Original ACT uses CVAE (Conditional VAE) to model multimodal behavior.
+Scripted expert demos have a single correct trajectory per state — no multimodality.
+**Fix:** Used deterministic Transformer decoder without CVAE. chunk_size=20 (0.67s lookahead)
+provides temporal coherence. Padded near episode end with last-action repeat.
+**Rule:** Skip CVAE for deterministic demos. Add it when training on human (multimodal) data.
+
+## L019: Freeze early ResNet layers for small datasets
+**Discovery:** 15.6M param model with only 9000 samples risks overfitting on visual features.
+ResNet18 low-level features (edges, textures) transfer well from ImageNet.
+**Fix:** Freeze layers 0-6 of ResNet18, only fine-tune layer4 and the img_proj head.
+Reduces trainable params from 15.6M to 12.8M. Layer4 adapts to MuJoCo rendering style.
+**Rule:** For <50K training samples, freeze all but the last ResNet block.
+
+## L020: Preload + resize images at init for training speed
+**Discovery:** Lazy HDF5 image loading (per __getitem__) is too slow for iterative training.
+60 episodes × 90 frames × 480×640×3 = 4.7 GB raw. Not feasible to keep in full resolution.
+**Fix:** At Dataset init: load all episodes, resize images to 224×224, store as uint8 (~515 MB).
+Normalize to float32 only at __getitem__ time. Training throughput: ~19s/epoch on RTX 4050.
+**Rule:** For datasets <1GB after resize, preload everything. Normalize lazily.
+
+## L021: Proximity-based auto-grasp/release simplifies VLA evaluation
+**Discovery:** ACT model predicts only joint positions (29-dim), not grasp commands.
+Need a mechanism to trigger grasp/release during evaluation rollouts.
+**Fix:** Auto-grasp when hand < 4cm from cube. Auto-release (place task only) when
+grasped > 30 steps AND cube within 6cm of target AND hand z is low.
+**Rule:** Standard simplification in VLA research. Model learns trajectory; grasping is mechanical.
+
+## L022: Place marker must have contype=0 conaffinity=0 to avoid physics effects
+**Discovery:** Visual markers added to the scene can interfere with physics if they have
+default collision properties. A blue plate marker could block cube placement.
+**Fix:** Set `contype="0" conaffinity="0"` on purely visual geoms like place_marker.
+**Rule:** Always disable collision on visual-only scene elements.
+
+## L023: release_after_wp extends kinematic recording for multi-step tasks
+**Discovery:** Pick-and-place requires both grasping and releasing within one episode.
+The original `_kinematic_record` only supported `grasp_after_wp`.
+**Fix:** Added `release_after_wp` parameter — deactivates weld after specified waypoint.
+For place: grasp_after_wp=1 (descend to cube), release_after_wp=4 (lower to target).
+**Rule:** Keep kinematic recording extensible with per-waypoint event hooks.
+
+---
+
+# Evaluation & Inference — Lessons Learned
+
+---
+
+## L024: Temporal ensembling is essential for closed-loop behavior cloning
+**Discovery:** ACT model with loss=0.000009 produced 0% success on ALL tasks. Single-chunk
+predictions compound errors within 30 steps — the state drifts from training distribution.
+**Fix:** Temporal ensembling (from ACT paper): re-plan every 5 steps (chunk_exec=5),
+exponentially-weighted average of overlapping chunks (ensemble_k=0.01). Newer predictions
+get higher weight: `w = exp(-k * j)` where j is offset into the chunk.
+**Rule:** Never evaluate BClosed-loop behavior cloning without temporal ensembling. Low training
+loss means nothing for closed-loop rollout. Budget equal time for inference engineering as
+for training.
+
+## L025: Hierarchical task decomposition for multi-phase tasks
+**Discovery:** Pick and place tasks got 0% even with temporal ensembling. The model
+immediately moved the hand UP instead of approaching the cube. Root cause: task embedding
+averages approach-phase and lift-phase training samples, producing net upward movement.
+**Fix:** Split composite tasks into phases: Phase 1 uses "grasp" embedding (approach only),
+Phase 2 switches to "pick"/"place" embedding after auto-grasp triggers. Reset ensembling
+buffers at phase transition to prevent stale approach actions from bleeding in.
+**Rule:** If a task has distinct phases (approach → manipulate), use sub-goal embeddings.
+The simplest embedding is the one with the most homogeneous training data.
+
+## L026: Prevent auto-grasp re-triggering after weld release
+**Discovery:** Place task: after releasing the cube near the target, auto-grasp immediately
+re-triggered because hand and cube were at the same position (just un-welded). The cube
+was permanently "stuck" to the hand despite release logic firing correctly.
+**Fix:** Added `released = False` flag. After release: set `released = True`. In auto-grasp
+check: `if not grasped and not released:`.
+**Rule:** Any proximity-based grasping heuristic needs a one-way latch after intentional release.
+
+## L027: Kinematic mode has no gravity — simulate drop after weld release
+**Discovery:** In kinematic mode (`mj_forward` only), after releasing a weld constraint,
+the cube stays floating in mid-air at whatever z-position the hand was at. Physics forces
+are not computed.
+**Fix:** After release, manually set `data.qpos[cube_z_adr] = 0.825` (table surface height)
+and call `mj_forward()`. This simulates gravity dropping the cube onto the table.
+**Rule:** When using `mj_forward` (no `mj_step`), manually handle any physics effects
+that would occur naturally in dynamics mode (gravity, collisions, sliding).

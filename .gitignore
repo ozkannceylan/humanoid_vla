@@ -31,14 +31,16 @@ ros2_ws/log/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Logs — track .log files, ignore everything else in logs/
+logs/*
+!logs/*.log
 
 # Personal notes
 tasks/ozkan_todo.md
 
-# Study notes (personal learning material)
-study/
+# Study notes — track .md files, ignore everything else
+study/*
+!study/*.md
 
 # Demo data (large binary files)
 data/

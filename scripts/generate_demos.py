@@ -99,6 +99,11 @@ class SimWrapper:
             self.model, mujoco.mjtObj.mjOBJ_JOINT, "cube_joint")
         self.cube_qpos_adr = self.model.jnt_qposadr[self.cube_joint_id]
 
+        # Place target site (Phase C — may not exist in older scene XMLs)
+        pid = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_SITE, "place_site")
+        self.place_site_id = pid if pid >= 0 else None
+
         # Arm joint qpos addresses and limits
         self.arm_qpos_adr = np.array([
             self.model.jnt_qposadr[self.model.actuator_trnid[ci, 0]]
@@ -136,6 +141,13 @@ class SimWrapper:
     @property
     def cube_pos(self) -> np.ndarray:
         return self.data.xpos[self.cube_body_id].copy()
+
+    @property
+    def place_pos(self):
+        """Position of the place target site, or None if not in scene."""
+        if self.place_site_id is None:
+            return None
+        return self.data.site_xpos[self.place_site_id].copy()
 
     @property
     def arm_q(self) -> np.ndarray:
@@ -281,9 +293,28 @@ def generate_pick(sim: SimWrapper, rng: np.random.Generator) -> dict:
                               hold=20, grasp_after_wp=1)
 
 
+def generate_place(sim: SimWrapper, rng: np.random.Generator) -> dict:
+    """Pick up cube, move to place target, lower and release."""
+    sim.reset_with_noise(rng)
+    cube = sim.cube_pos.copy()
+    place = sim.place_pos.copy()
+    # Waypoints: approach → descend → [GRASP] → lift → above target → lower → [RELEASE]
+    lift_z = max(cube[2], place[2]) + 0.13  # clearance above both positions
+    waypoints = [
+        cube + np.array([0, 0, 0.08]),       # above cube
+        cube + np.array([0, 0, 0.02]),       # at cube (grasp here)
+        np.array([cube[0], cube[1], lift_z]),  # lift
+        np.array([place[0], place[1], lift_z]),  # above target
+        place + np.array([0, 0, 0.02]),      # lower to target (release here)
+    ]
+    return _kinematic_record(sim, rng, waypoints, [35, 25, 25, 30, 25],
+                              hold=20, grasp_after_wp=1, release_after_wp=4)
+
+
 def _kinematic_record(sim: SimWrapper, rng: np.random.Generator,
                       waypoints: list, frames_per: list, hold: int = 15,
-                      grasp_after: bool = False, grasp_after_wp: int = -1) -> dict:
+                      grasp_after: bool = False, grasp_after_wp: int = -1,
+                      release_after_wp: int = -1) -> dict:
     """
     Unified generation: solve IK for waypoints, interpolate, playback with physics.
 
@@ -293,6 +324,7 @@ def _kinematic_record(sim: SimWrapper, rng: np.random.Generator,
 
     grasp_after: activate weld after all waypoints (for grasp task)
     grasp_after_wp: activate weld after waypoint index N (for pick task)
+    release_after_wp: deactivate weld after waypoint index N (for place task)
     """
     # Save cube noise state
     cube_dx = sim.data.qpos[sim.cube_qpos_adr + 0] - sim.model.qpos0[sim.cube_qpos_adr + 0]
@@ -333,6 +365,11 @@ def _kinematic_record(sim: SimWrapper, rng: np.random.Generator,
         if not grasp_done and grasp_after_wp >= 0 and t >= wp_frame_idx[grasp_after_wp] - 1:
             sim.set_weld(True)
             grasp_done = True
+
+        # Check if we should release
+        if grasp_done and release_after_wp >= 0 and t >= wp_frame_idx[release_after_wp] - 1:
+            sim.set_weld(False)
+            grasp_done = False
 
     # Grasp after all waypoints
     if grasp_after and not grasp_done:
@@ -378,6 +415,7 @@ TASK_MAP = {
     "reach": ("reach the red cube", generate_reach),
     "grasp": ("grasp the red cube", generate_grasp),
     "pick":  ("pick up the red cube", generate_pick),
+    "place": ("place the red cube on the blue plate", generate_place),
 }
 
 
