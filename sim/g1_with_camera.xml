@@ -60,6 +60,21 @@
             mass="0.05" solimp="0.99 0.99 0.001" solref="0.01 1"/>
       <site name="cube_site" pos="0 0 0" size="0.005" rgba="0 0 0 0"/>
     </body>
+
+    <!-- Phase C2: Green box for bimanual manipulation.
+         20×15×15cm (half-extents: 0.10×0.075×0.075). Mass 0.3kg.
+         Centered at y=0 (robot midline) — symmetric for both arms.
+         Table top at z=0.8 → box centre z = 0.8 + 0.075 = 0.875.
+         condim=4 enables torsional friction for stable grasp.
+         High friction (1.5) simulates rubber-on-cardboard contact. -->
+    <body name="green_box" pos="0.3 0.0 0.875">
+      <freejoint name="box_joint"/>
+      <geom name="box_geom" type="box" size="0.10 0.075 0.075"
+            rgba="0.2 0.7 0.2 1" mass="0.3"
+            friction="1.5 0.005 0.0001" condim="4"
+            solimp="0.95 0.95 0.001" solref="0.01 1"/>
+      <site name="box_site" pos="0 0 0" size="0.005" rgba="0 0 0 0"/>
+    </body>
   </worldbody>
 
   <!-- Grasp weld: attaches cube to right hand. Disabled by default;

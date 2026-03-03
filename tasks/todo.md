@@ -262,6 +262,120 @@ All milestones delivered. Key metrics:
 
 ---
 
+# Phase C2 — Bimanual Box Manipulation (Full Physics)
+
+Last updated: 2026-03-04
+
+**Goal:** Two-hand squeeze grasp of a larger box (20×15×15 cm), using real physics
+simulation (mj_step with contact forces and friction). Separate ACT model for bimanual tasks.
+
+**Key architectural change:** Transition from kinematic mode (mj_forward) to full physics
+(mj_step) with PD controller, gravity compensation, and contact-based friction grasping.
+No weld constraints — the box is held purely by friction from both hands squeezing.
+
+**RESULT:** 100% success rate (20/20), mean lift 8.5cm, bilateral forces 13-14N.
+
+---
+
+## Milestone C2.0: Model Preparation ✅
+
+- [x] Add `left_hand_site` to `g1_29dof.xml` (mirror of right_hand_site)
+- [x] Add collision geoms ("palm pads") to both hands for contact
+  - Box-shaped geoms (~8×6×2 cm) approximating palm surface
+  - `friction="1.5 0.005 0.0001"` (high sliding friction for rubber-on-cardboard)
+  - `contype="1" conaffinity="1"` (enable contact detection)
+  - Must not interfere with existing single-arm tasks (cube is too small to touch palms)
+- [x] Verify: existing kinematic pipeline still works (regression test)
+
+---
+
+## Milestone C2.1: Scene Extension ✅
+
+- [x] Add big box to `g1_with_camera.xml`:
+  - Size: 10×7.5×7.5 cm half-extents (= 20×15×15 cm full)
+  - Freejoint, mass ~0.3 kg, high friction
+  - Position: centered in front of robot, reachable by both arms
+  - Color: green (distinct from red cube and blue plate)
+  - Proper contact parameters: solimp, solref, condim=4 (torsional friction)
+- [x] Add `box_site` for position tracking
+- [x] Verify: box stays on table under gravity with mj_step
+
+---
+
+## Milestone C2.2: Physics Sim Wrapper ✅
+
+- [x] `scripts/physics_sim.py` — new sim wrapper using mj_step
+  - PD controller: τ = Kp*(q_des - q) - Kd*q̇ + gravity_comp
+  - Fixed base (pelvis frozen kinematically each step)
+  - Both arms controllable: LEFT_ARM_CTRL + RIGHT_ARM_CTRL
+  - Bimanual IK solver (iterative Jacobian for both arms independently)
+  - Camera rendering (offscreen EGL)
+  - Step = 16 mj_step calls per control frame (500Hz physics / 30Hz control)
+- [x] Contact monitoring: detect hand-box contact pairs
+- [x] PD gain tuning: Kp=40/10, Kd=4/1 (shoulders/wrists)
+- [x] Freeze ALL non-arm joints (legs + waist) every substep (L028)
+- [x] Verify: hands stable at targets, squeeze forces 11-14N bilateral
+
+---
+
+## Milestone C2.3: Bimanual Trajectory Planning ✅
+
+- [x] Trajectory design (6 waypoints, synchronized left/right):
+  1. HOME: rest position
+  2. PRE-APPROACH: above + sides of box (collision-free path)
+  3. APPROACH: 5cm outside box surface at box height
+  4. SQUEEZE: 3cm inside box surface (compliance grasping)
+  5. LIFT: squeeze pos + 15cm up
+  6. HOLD: stabilize at lifted height
+- [x] Bimanual IK: solve left arm and right arm independently
+- [x] ±10% timing variation for training diversity
+- [x] Verify: trajectory + PD → box lifts 6-9cm, held by friction
+
+---
+
+## Milestone C2.4: Demo Generation ✅
+
+- [x] `scripts/generate_bimanual_demos.py` — physics-based demo generator
+  - PD tracking of planned trajectories via mj_step
+  - Records: camera (480×640×3) + joint state/vel (14D) + actions (14D)
+  - 30 Hz control, 500 Hz physics, ±2cm box position noise
+- [x] Generate 30 episodes: 100% success, lifts 4.4-9.5cm, forces 13-14N
+- [x] Verify: smooth trajectories, no oscillation, box doesn't slip
+
+---
+
+## Milestone C2.5: Bimanual ACT Model + Training ✅
+
+- [x] Bimanual ACT: state_dim=28 (14 pos + 14 vel), action_dim=14 (both arms)
+  - Same architecture: ResNet18 + MLP + TaskEmbed → TransformerDecoder
+  - Task label: "pick up the green box with both hands"
+  - 15.6M total params, 12.8M trainable
+- [x] Train: 300 epochs, loss 0.0177 → 0.000009, 52.5 min on RTX 4050
+- [x] Checkpoints: data/bimanual_checkpoints/{best.pt, latest.pt}
+
+---
+
+## Milestone C2.6: Evaluation ✅
+
+- [x] Evaluate bimanual model with full physics (mj_step)
+- [x] Success: box lifted ≥3cm + BOTH palms in contact + force ≥2N per palm
+- [x] 20 episodes: **100% success rate (20/20)**
+- [x] Lift: mean=8.5cm, min=6.5cm, max=10.4cm
+- [x] Force: L_mean=13.6N, R_mean=13.3N
+- [x] Target was >50% — achieved 100%
+
+---
+
+## Milestone C2.7: Live Demo + Documentation ✅
+
+- [x] Live viewer with scripted expert demo (`scripts/live_bimanual.py`)
+- [x] Live viewer with ACT model inference (`--checkpoint` flag)
+- [x] Study document: `study/04_bimanual_physics_grasping.md`
+- [x] Update lessons.md (L028-L033), README.md
+- [x] Git commit
+
+---
+
 ## Phase B Quick Reference
 
 ```bash

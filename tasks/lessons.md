@@ -225,3 +225,53 @@ are not computed.
 and call `mj_forward()`. This simulates gravity dropping the cube onto the table.
 **Rule:** When using `mj_forward` (no `mj_step`), manually handle any physics effects
 that would occur naturally in dynamics mode (gravity, collisions, sliding).
+
+# Phase C2 — Bimanual Physics Lessons
+
+---
+
+## L028: Leg/waist joints drift under mj_step even with frozen pelvis
+**Discovery:** Freezing only the floating base (qpos[:7], qvel[:6]) is insufficient.
+Waist joints connect pelvis to shoulders — any drift tilts the torso, moving shoulders
+and hands far from targets. After 20 settle frames, hands drifted 8cm up.
+**Fix:** Freeze ALL non-arm actuated joints (legs ctrl[0:12] + waist ctrl[12:15]) every
+substep alongside the pelvis. Only arm joints (ctrl[15:28]) run under physics.
+**Rule:** For fixed-base manipulation with mj_step, lock every joint except the ones
+you intend to control. qvel index = qpos_address - 1 (due to 7-qpos/6-qvel floating base).
+
+## L029: G1 hand geoms have contype=0 — no collision by default
+**Discovery:** Both `left_rubber_hand` and `right_rubber_hand` mesh geoms have
+`contype="0" conaffinity="0"` in the official MJCF. They are visual only and pass
+through all objects. No friction-based grasping is possible with them.
+**Fix:** Added box-shaped "palm pad" collision geoms (8×6×2cm) to both wrist_yaw_link
+bodies with `contype="1" conaffinity="1"` friction="1.5" condim="4".
+**Rule:** Always verify contype/conaffinity before relying on contact physics. Visual
+meshes often have collisions disabled for performance.
+
+## L030: Position-only IK gives good palm orientation for lateral squeeze
+**Discovery:** Feared that without orientation constraints, palms might not face the
+box. Testing showed palm local Y axis is 98% aligned with world Y at squeeze config.
+The kinematic chain naturally orients the hand forward when reaching laterally.
+**Rule:** For symmetric bimanual lateral squeeze, position-only IK is sufficient.
+Add orientation IK only if the task requires non-natural hand orientations.
+
+## L031: Box rotates slightly during lift (known issue)
+**Discovery:** The green box rotates ~5-10° around vertical axis during lift. Cause:
+slight asymmetry in left/right contact forces and palm pad positioning. Not critical
+for demo/training purposes but visually imperfect.
+**TODO:** Fix by adding orientation constraint to IK, or by using condim=6 (full
+friction cone with torsional component), or by adding a second palm pad per hand.
+
+## L032: Bimanual single-task ACT achieves 100% with 30 demos
+**Discovery:** 30 bimanual demos with minimal variation (±2cm box noise) → 100% eval
+success (20/20). Low-dimensional action space (14 vs 29), single task, and consistent
+demonstrations make the learning problem trivial for ACT.
+**Rule:** For focused tasks with consistent demos, 30 episodes is sufficient for ACT.
+Multi-task or higher variation may need 50-100+. Start small, scale if needed.
+
+## L033: Compliance grasping works via PD targets inside the object surface
+**Discovery:** Setting PD position targets inside the box surface creates steady squeeze
+force without a force controller. The PD controller pushes toward the unreachable target,
+the contact constraint pushes back, and equilibrium produces 13-14N bilateral force.
+**Rule:** For friction grasping, command hand targets 2-3cm inside the object surface.
+Force magnitude is proportional to penetration depth × Kp gain.

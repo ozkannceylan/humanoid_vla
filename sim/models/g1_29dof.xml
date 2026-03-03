@@ -300,6 +300,17 @@
                           <geom pos="0.0415 0.003 0" quat="1 0 0 0" type="mesh" contype="0"
                             conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1"
                             mesh="left_rubber_hand" />
+                          <!-- Palm collision pad for physics-based grasping (Phase C2).
+                               Box approximating palm surface. High friction for squeeze grasp.
+                               pos: 8cm along X (palm center), +3mm Y (left hand offset).
+                               size: 4×3×1 cm half-extents (8×6×2 cm pad). -->
+                          <geom name="left_palm_pad" type="box" pos="0.08 0.003 0"
+                                size="0.04 0.03 0.01" rgba="0.5 0.8 0.5 0.3"
+                                friction="1.5 0.005 0.0001" condim="4"
+                                mass="0.01"/>
+                          <!-- Left hand IK target site (mirror of right_hand_site) -->
+                          <site name="left_hand_site" pos="0.1 0 0" size="0.015"
+                                rgba="0 0 1 0.5" type="sphere"/>
                         </body>
                       </body>
                     </body>
@@ -376,6 +387,14 @@
                           <geom pos="0.0415 -0.003 0" quat="1 0 0 0" type="mesh" contype="0"
                             conaffinity="0" group="1" density="0" rgba="0.7 0.7 0.7 1"
                             mesh="right_rubber_hand" />
+                          <!-- Palm collision pad for physics-based grasping (Phase C2).
+                               Box approximating palm surface. High friction for squeeze grasp.
+                               pos: 8cm along X (palm center), -3mm Y (right hand offset).
+                               size: 4×3×1 cm half-extents (8×6×2 cm pad). -->
+                          <geom name="right_palm_pad" type="box" pos="0.08 -0.003 0"
+                                size="0.04 0.03 0.01" rgba="0.5 0.8 0.5 0.3"
+                                friction="1.5 0.005 0.0001" condim="4"
+                                mass="0.01"/>
                           <!-- Hand site for IK target tracking (palm centre) -->
                           <site name="right_hand_site" pos="0.1 0 0" size="0.015"
                                 rgba="0 1 0 0.5" type="sphere"/>
