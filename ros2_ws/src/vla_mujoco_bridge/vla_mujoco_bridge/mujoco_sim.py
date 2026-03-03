@@ -163,6 +163,44 @@ class MujocoSim:
     def stop(self) -> None:
         self._running = False
 
+    def get_site_xpos(self, site_name: str) -> np.ndarray | None:
+        """Return Cartesian position [x,y,z] of a named site (thread-safe)."""
+        sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+        if sid < 0:
+            return None
+        with self.lock:
+            return self.data.site_xpos[sid].copy()
+
+    def get_body_xpos(self, body_name: str) -> np.ndarray | None:
+        """Return Cartesian position [x,y,z] of a named body (thread-safe)."""
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        if bid < 0:
+            return None
+        with self.lock:
+            return self.data.xpos[bid].copy()
+
+    def get_site_jacp(self, site_name: str) -> np.ndarray | None:
+        """Return positional Jacobian (3, nv) for a named site (thread-safe)."""
+        sid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+        if sid < 0:
+            return None
+        jacp = np.zeros((3, self.model.nv))
+        with self.lock:
+            mujoco.mj_jacSite(self.model, self.data, jacp, None, sid)
+        return jacp
+
+    def set_grasp(self, enabled: bool) -> bool:
+        """Enable/disable the grasp weld constraint. Returns True if found."""
+        eid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_EQUALITY, "grasp_weld")
+        if eid < 0:
+            return False
+        with self.lock:
+            # MuJoCo 3.x: eq_active0 (initial), but runtime toggle uses eq_active on data
+            self.model.eq_active0[eid] = 1 if enabled else 0
+            # Also force it in data for immediate effect
+            self.data.eq_active[eid] = 1 if enabled else 0
+        return True
+
     # ------------------------------------------------------------------
     # Internal: PD controller
     # ------------------------------------------------------------------

@@ -101,3 +101,34 @@ robot is bolted to a table or mounted on a fixed base.
   - Publish (rgb8): `msg=Image(); msg.height,msg.width=frame.shape[:2]; msg.encoding="rgb8"; msg.step=frame.shape[1]*3; msg.data=frame.tobytes()`
   - Subscribe: `np.frombuffer(bytes(msg.data),dtype=np.uint8).reshape(msg.height,msg.width,3)`
 **Rule:** Never use cv_bridge in this project. Direct numpy serialization has no ABI dependencies.
+
+## L013: ctrlrange for motor actuators is torque limits, not position limits
+**Discovery:** G1's `<motor>` actuators have `ctrlrange` = ±25Nm (shoulder) and ±5Nm (wrist).
+These are TORQUE limits. The demo generator was clipping target joint POSITIONS to
+`0.95 * ctrlrange` (±23.75 rad) — an absurd range that provides zero actual clamping.
+**Fix:** Use `model.jnt_range[jnt_id]` for actual joint position limits (±1-3 rad).
+Built `arm_pos_lo/hi` from `jnt_range` instead of `ctrlrange`.
+**Rule:** For position control, always use `jnt_range`, never `ctrlrange` (which is torque limits for motor actuators).
+
+## L014: G1 right arm reach is 0.51m from shoulder — place targets within 0.40m
+**Discovery:** Cube originally at (0.6, 0.0, 0.825) was 0.66m from shoulder at (0, -0.10, 1.08).
+The arm's total reach is only 0.51m. IK correctly hit kinematic singularity (σ₃ ≈ 0.003).
+**Fix:** Moved table + cube to (0.3, -0.1) — well within comfortable reach.
+Validated with reachability sweep: x=0.20→0.40 all converge in <20 IK iterations.
+**Rule:** Keep manipulation targets within 0.40m of shoulder. Test with reachability sweep before committing.
+
+## L015: For demo generation, kinematic IK (qpos + mj_forward) beats PD tracking
+**Discovery:** PD-based tracking through `mj_step` failed: (1) KP too weak → arm barely moved,
+(2) physics forces displaced the cube, (3) required extensive gain tuning per-joint.
+**Fix:** Pure kinematic playback: set `data.qpos` directly + `mj_forward`. No dynamics.
+Arm follows trajectory perfectly, cube stays static (or follows hand via manual weld enforcement).
+**Rule:** For scripted expert demo generation, skip dynamics entirely. Use mj_forward (kinematics only).
+Save mj_step for real-time control or RL.
+
+## L016: mj_forward does NOT enforce equality constraints — enforce weld manually
+**Discovery:** With pure kinematic playback, `mj_forward` computes positions from qpos but
+does NOT solve constraint forces. Weld constraint between cube and hand is ignored.
+During "pick" demos, hand lifted but cube stayed on the table.
+**Fix:** After `mj_forward`, check `data.eq_active[weld_id]` and if active, set
+`data.qpos[cube_qpos_adr:+3] = data.site_xpos[hand_site_id]` then call `mj_forward` again.
+**Rule:** When using kinematic mode, manually enforce equality constraints by updating qpos.

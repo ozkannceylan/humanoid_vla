@@ -36,21 +36,31 @@
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
 
     <!-- Fixed overhead camera for debugging / demo monitoring -->
-    <camera name="scene_camera" pos="0.6 -1.2 1.8" xyaxes="1 0 0 0 0.5 1"/>
+    <camera name="scene_camera" pos="0.3 -0.8 1.6" xyaxes="1 0 0 0 0.5 1"/>
 
-    <!-- Simple table for manipulation tasks -->
-    <body name="table" pos="0.6 0 0">
-      <geom type="box" size="0.3 0.3 0.4" pos="0 0 0.4" rgba="0.6 0.4 0.2 1"/>
+    <!-- Table for manipulation tasks — within right arm workspace.
+         Table top at z=0.8 (half-height 0.4, pos 0 0 0.4). -->
+    <body name="table" pos="0.3 -0.1 0">
+      <geom type="box" size="0.2 0.2 0.4" pos="0 0 0.4" rgba="0.6 0.4 0.2 1"/>
     </body>
 
     <!-- Red cube on table — Phase B manipulation target.
          Freejoint so it can be displaced by the robot hand.
-         Table top is at z=0.8; cube half-size=0.025 → centre z=0.825 -->
-    <body name="red_cube" pos="0.6 0.0 0.825">
+         Table top is at z=0.8; cube half-size=0.025 → centre z=0.825
+         Position chosen for comfortable right-arm reach (x=0.3, y=-0.1). -->
+    <body name="red_cube" pos="0.3 -0.1 0.825">
       <freejoint name="cube_joint"/>
-      <geom type="box" size="0.025 0.025 0.025" rgba="0.9 0.1 0.1 1"
+      <geom name="cube_geom" type="box" size="0.025 0.025 0.025" rgba="0.9 0.1 0.1 1"
             mass="0.05" solimp="0.99 0.99 0.001" solref="0.01 1"/>
+      <site name="cube_site" pos="0 0 0" size="0.005" rgba="0 0 0 0"/>
     </body>
   </worldbody>
+
+  <!-- Grasp weld: attaches cube to right hand. Disabled by default;
+       enabled at runtime by task_commander when hand is close enough. -->
+  <equality>
+    <weld name="grasp_weld" body1="right_wrist_yaw_link" body2="red_cube"
+          relpose="0.1 0 0 1 0 0 0" active="false"/>
+  </equality>
 
 </mujoco>

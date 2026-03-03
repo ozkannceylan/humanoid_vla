@@ -33,6 +33,8 @@ from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
 from sensor_msgs.msg import Image, JointState
+from std_srvs.srv import SetBool
+from geometry_msgs.msg import PointStamped
 
 from vla_mujoco_bridge.mujoco_sim import MujocoSim
 
@@ -52,6 +54,14 @@ class MujocoBridgeNode(Node):
         )
         self.create_timer(0.01, self._pub_joints, callback_group=cbg)      # 100 Hz
         self.create_timer(1.0 / 30.0, self._pub_camera, callback_group=cbg) # 30 Hz
+
+        # Services for task_commander
+        self.create_service(SetBool, "/grasp", self._srv_grasp, callback_group=cbg)
+
+        # Publish hand & cube positions for task_commander IK
+        self.hand_pub = self.create_publisher(PointStamped, "/hand_pos", 10)
+        self.cube_pub = self.create_publisher(PointStamped, "/cube_pos", 10)
+        self.create_timer(0.05, self._pub_positions, callback_group=cbg)  # 20 Hz
 
         self.get_logger().info("MuJoCo bridge node ready")
 
@@ -82,6 +92,29 @@ class MujocoBridgeNode(Node):
         if msg.position:
             self.sim.set_joint_command(np.array(msg.position))
 
+    def _srv_grasp(self, request, response):
+        ok = self.sim.set_grasp(request.data)
+        response.success = ok
+        response.message = ("grasp enabled" if request.data else "grasp released") if ok else "weld not found"
+        self.get_logger().info(response.message)
+        return response
+
+    def _pub_positions(self):
+        stamp = self.get_clock().now().to_msg()
+        hand = self.sim.get_site_xpos("right_hand_site")
+        if hand is not None:
+            msg = PointStamped()
+            msg.header.stamp = stamp
+            msg.header.frame_id = "world"
+            msg.point.x, msg.point.y, msg.point.z = hand.tolist()
+            self.hand_pub.publish(msg)
+        cube = self.sim.get_body_xpos("red_cube")
+        if cube is not None:
+            msg = PointStamped()
+            msg.header.stamp = stamp
+            msg.header.frame_id = "world"
+            msg.point.x, msg.point.y, msg.point.z = cube.tolist()
+            self.cube_pub.publish(msg)
 
 def main(args=None):
     rclpy.init(args=args)

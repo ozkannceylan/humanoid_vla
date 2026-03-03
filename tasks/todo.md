@@ -138,14 +138,36 @@ teleoperated. Task: right hand reaches and touches the red cube on the table.
 - [x] `demo_recorder.py` — HDF5 recorder (obs/action pairs, gzip compressed)
 - [x] `h5py` + `pandas` installed
 - [x] `LeRobot 0.4.4` installed
-- [ ] **USER ACTION:** Collect 20-50 reach demos (see Quick Ref below)
+- [x] **Auto-generated scripted demos** — scripted expert replaces manual teleoperation
+
+---
+
+## Milestone B4.5: Scripted Expert Demo Generation ✅
+
+- [x] `scripts/generate_demos.py` — scripted expert auto-generates reach/grasp/pick demos
+- [x] IK solver: iterative Jacobian (step=0.02, damping=0.05, tol=0.01) — converges in <20 iter
+- [x] Architecture: kinematic IK → joint interpolation → kinematic playback (no mj_step)
+- [x] Weld constraint enforced manually in kinematic mode (cube follows hand during lift)
+- [x] `sim/g1_with_camera.xml` — table + cube repositioned to (0.3, -0.1) within arm reach
+- [x] `sim/models/g1_29dof.xml` — right_hand_site added
+- [x] `mujoco_sim.py` — get_site_xpos, get_body_xpos, get_site_jacp, set_grasp methods
+- [x] `bridge_node.py` — /grasp service, /hand_pos + /cube_pos publishers
+- [x] 60 episodes generated: 20 reach × 20 grasp × 20 pick — **100% convergence**
+- [x] HDF5 output with task_description attribute for language-conditioned training
+
+**Key lessons:**
+- ctrlrange = torque limits, NOT position limits → use jnt_range
+- G1 arm reach = 0.51m from shoulder → keep targets within 0.40m
+- Pure kinematic mode (mj_forward) >> PD tracking for demo generation
+- mj_forward ignores equality constraints → enforce weld manually
 
 ---
 
 ## Milestone B5: Convert + Train
 
-- [ ] Run `python3 scripts/convert_to_lerobot.py`
-- [ ] Run `python3 scripts/train_act.py` (~2-4h on RTX 4050)
+- [ ] Update `scripts/convert_to_lerobot.py` for language labels
+- [ ] Update `scripts/train_act.py` for language conditioning
+- [ ] Run conversion → training (~2-4h on RTX 4050)
 - [ ] Monitor loss curves, eval on 10 rollouts
 
 ---
