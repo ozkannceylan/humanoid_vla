@@ -211,11 +211,12 @@ class PhysicsSim:
         self._locked_qpos_vals = self.data.qpos[self._locked_qpos_adr].copy()
         self.target_pos[:] = 0.0
 
-    def reset_with_noise(self, rng: np.random.Generator):
-        """Reset with small random displacement to box position."""
+    def reset_with_noise(self, rng: np.random.Generator,
+                         noise_x: float = 0.02, noise_y: float = 0.02):
+        """Reset with random displacement to box position."""
         self.reset()
-        self.data.qpos[self.box_qpos_adr + 0] += rng.uniform(-0.02, 0.02)
-        self.data.qpos[self.box_qpos_adr + 1] += rng.uniform(-0.02, 0.02)
+        self.data.qpos[self.box_qpos_adr + 0] += rng.uniform(-noise_x, noise_x)
+        self.data.qpos[self.box_qpos_adr + 1] += rng.uniform(-noise_y, noise_y)
         mujoco.mj_forward(self.model, self.data)
         # Let box settle on table (a few physics steps)
         for _ in range(50):
@@ -224,6 +225,41 @@ class PhysicsSim:
         self.data.qpos[:7] = self._base_qpos
         self.data.qvel[:6] = 0.0
         mujoco.mj_forward(self.model, self.data)
+
+    def random_arm_start(self, rng: np.random.Generator, arm: str = 'both',
+                         spread: float = 0.25) -> tuple:
+        """Set arm(s) to random valid starting configurations.
+
+        Args:
+            arm: 'left', 'right', or 'both'
+            spread: fraction of joint range to sample from
+        Returns:
+            Tuple of (left_q, right_q) arrays
+        """
+        def _sample_arm(qpos_adr, lo, hi, hand_site_id):
+            mid = (lo + hi) / 2
+            half_range = (hi - lo) / 2 * spread
+            for _ in range(20):
+                q = rng.uniform(mid - half_range, mid + half_range)
+                q = np.clip(q, lo, hi)
+                self.data.qpos[qpos_adr] = q
+                mujoco.mj_forward(self.model, self.data)
+                hand_z = self.data.site_xpos[hand_site_id, 2]
+                if hand_z > 0.85:
+                    return q
+            # Fallback
+            self.data.qpos[qpos_adr] = 0.0
+            mujoco.mj_forward(self.model, self.data)
+            return np.zeros(7)
+
+        left_q = right_q = None
+        if arm in ('left', 'both'):
+            left_q = _sample_arm(self.left_arm_qpos_adr, self.left_arm_lo,
+                                 self.left_arm_hi, self.left_hand_site_id)
+        if arm in ('right', 'both'):
+            right_q = _sample_arm(self.right_arm_qpos_adr, self.right_arm_lo,
+                                  self.right_arm_hi, self.right_hand_site_id)
+        return left_q, right_q
 
     # ── PD Controller + Physics Step ────────────────────
 

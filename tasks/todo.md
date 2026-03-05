@@ -500,3 +500,74 @@ python3 scripts/train_act.py
 | R/F | Right elbow ±         | | 7/8 | Left elbow ± |
 | Z/X | Right wrist pitch ±   | | 9/0 | Left wrist pitch ± |
 | **space** | Reset all arms to zero | | **Esc** | Quit |
+
+
+---
+
+## Phase F: Domain Randomization & Generalization
+
+**Motivation:** Phases A-E achieved 86.2% single-arm and 100% bimanual success, but these
+numbers reflect trajectory memorization, not true visual-motor generalization. The model
+memorizes "red blob at pixel (320,380)" because the camera, robot, and box positions are
+nearly identical every episode.
+
+### F0: Training-Time Image Augmentation
+- [x] Add `augment` flag to `DemoDataset` and `BimanualDemoDataset`
+- [x] ColorJitter (brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05)
+- [x] GaussianBlur (p=0.3), RandomResizedCrop (scale=0.85-1.0, p=0.5)
+- [x] `--no-augment` CLI flag in train_act.py and train_bimanual.py
+- **Files:** `scripts/act_model.py`, `scripts/train_bimanual.py`, `scripts/train_act.py`
+
+### F1: Wider Object Position Randomization
+- [x] `noise_range` parameter (default 0.03, use 0.10 for Phase F)
+- [x] Table-bounds clamping (margin=0.175 from table center)
+- [x] Reachability pre-check (`is_reachable`, max 0.40m from shoulder)
+- [x] IK retry loop (10 attempts, `_kinematic_record` returns None on failure)
+- [x] `--noise-range` CLI flag in generate_demos.py, evaluate.py
+- [x] Bimanual: `--noise-x` / `--noise-y` in generate_bimanual_demos.py
+- **Files:** `scripts/generate_demos.py`, `scripts/physics_sim.py`, `scripts/generate_bimanual_demos.py`, `scripts/evaluate.py`
+
+### F2: Robot Starting Posture Variation
+- [x] `random_arm_start()` in SimWrapper (single-arm, spread=0.3)
+- [x] `random_arm_start()` in PhysicsSim (bimanual, spread=0.25)
+- [x] Retry 20x, hand must be above z=0.85, fallback to zeros
+- [x] `--random-start` CLI flag in both generators
+- [x] `plan_bimanual_trajectory` accepts optional `q_home_L`, `q_home_R`
+- **Files:** `scripts/generate_demos.py`, `scripts/physics_sim.py`, `scripts/generate_bimanual_demos.py`
+
+### F4: Visual Domain Randomization
+- [x] New `DomainRandomizer` class (`scripts/domain_randomization.py`)
+- [x] Runtime modification: table color, floor color, light pos/intensity
+- [x] Object color variation (hue-preserving brightness shifts)
+- [x] 3 distractor geoms in scene XML (invisible by default, `contype=0`)
+- [x] `--domain-rand` CLI flag in both generators
+- **Files:** `scripts/domain_randomization.py` (new), `sim/g1_with_camera.xml`, `scripts/generate_demos.py`, `scripts/generate_bimanual_demos.py`
+
+### F3: Camera Pose Perturbation
+- [x] Integrated into `DomainRandomizer.randomize()`
+- [x] ±2cm position, ±3deg orientation (quaternion perturbation)
+- [x] Wrist camera deferred to Phase G (changes model architecture)
+
+### F5: Generalization Evaluation Framework
+- [x] New `scripts/eval_generalization.py`
+- [x] 5 test distributions: in_dist, ood_position, ood_visual, ood_posture, ood_combined
+- [x] Summary table with per-distribution success rates
+- [x] Supports ablation: compare baseline vs augmented vs full randomization
+
+### Phase F Usage Examples
+
+```bash
+# Generate demos with full Phase F randomization
+MUJOCO_GL=egl python3 scripts/generate_demos.py --all-tasks --episodes 50 \
+    --noise-range 0.10 --random-start 0.3 --domain-rand \
+    --output data/demos_f
+
+# Train with image augmentation (on by default)
+python3 scripts/train_act.py --demos data/demos_f --epochs 300
+
+# Evaluate generalization across distributions
+MUJOCO_GL=egl python3 scripts/eval_generalization.py \
+    --checkpoint data/checkpoints/best.pt \
+    --train-noise-range 0.10 --train-random-start 0.3 \
+    --episodes 20
+```

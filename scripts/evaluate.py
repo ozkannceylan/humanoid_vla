@@ -78,7 +78,7 @@ SUCCESS_FN = {
 
 def run_episode(model, sim, task_label, rng, device='cuda',
                 max_steps=150, auto_grasp_dist=0.04, auto_release_delay=30,
-                chunk_exec=5, ensemble_k=0.01):
+                chunk_exec=5, ensemble_k=0.01, noise_range=0.03):
     """Run one episode with the ACT policy in kinematic MuJoCo sim.
 
     Uses temporal ensembling (ACT paper, Zhao et al. 2023):
@@ -101,7 +101,7 @@ def run_episode(model, sim, task_label, rng, device='cuda',
 
     Returns: (success, trajectory_length, final_hand_cube_dist)
     """
-    sim.reset_with_noise(rng)
+    sim.reset_with_noise(rng, noise_range=noise_range)
     chunk_size = model.chunk_size
     action_dim = model.action_dim
 
@@ -218,6 +218,8 @@ def main():
                         help="Tasks to evaluate (default: all known)")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--max-steps", type=int, default=250)
+    parser.add_argument("--noise-range", type=float, default=0.03,
+                        help="Object position noise for evaluation (default: 0.03)")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
@@ -254,6 +256,7 @@ def main():
             ok, length, dist = run_episode(
                 model, sim, task_label, rng,
                 device=device, max_steps=args.max_steps,
+                noise_range=args.noise_range,
             )
             successes += int(ok)
             dists.append(dist)

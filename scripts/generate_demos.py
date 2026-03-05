@@ -34,6 +34,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 
 import numpy as np
 import mujoco
+from domain_randomization import DomainRandomizer
 
 try:
     import h5py
@@ -121,6 +122,9 @@ class SimWrapper:
         self._base_qpos = self.data.qpos[:7].copy()
         self.target_pos = np.zeros(NUM_ACTUATORS)
 
+        # Domain randomization (Phase F)
+        self.randomizer = DomainRandomizer(self.model, self.data)
+
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
         mujoco.mj_forward(self.model, self.data)
@@ -128,11 +132,51 @@ class SimWrapper:
         self.target_pos[:] = 0.0
         self.set_weld(False)
 
-    def reset_with_noise(self, rng: np.random.Generator):
+    def reset_with_noise(self, rng: np.random.Generator, noise_range: float = 0.03):
         self.reset()
-        self.data.qpos[self.cube_qpos_adr + 0] += rng.uniform(-0.03, 0.03)
-        self.data.qpos[self.cube_qpos_adr + 1] += rng.uniform(-0.03, 0.03)
+        dx = rng.uniform(-noise_range, noise_range)
+        dy = rng.uniform(-noise_range, noise_range)
+        self.data.qpos[self.cube_qpos_adr + 0] += dx
+        self.data.qpos[self.cube_qpos_adr + 1] += dy
+        # Clamp to table bounds (table half-extent=0.2, cube half=0.025)
+        table_cx, table_cy = 0.3, -0.1
+        margin = 0.175  # 0.2 - 0.025
+        self.data.qpos[self.cube_qpos_adr + 0] = np.clip(
+            self.data.qpos[self.cube_qpos_adr + 0],
+            table_cx - margin, table_cx + margin)
+        self.data.qpos[self.cube_qpos_adr + 1] = np.clip(
+            self.data.qpos[self.cube_qpos_adr + 1],
+            table_cy - margin, table_cy + margin)
         mujoco.mj_forward(self.model, self.data)
+
+    def is_reachable(self, target_xyz: np.ndarray, max_dist: float = 0.40) -> bool:
+        """Check if target is within comfortable arm workspace."""
+        # Right shoulder approximate world position
+        shoulder = np.array([0.0, -0.10, 1.08])
+        return np.linalg.norm(target_xyz - shoulder) < max_dist
+
+    def random_arm_start(self, rng: np.random.Generator, spread: float = 0.3) -> np.ndarray:
+        """Set right arm to a random valid starting configuration.
+
+        Args:
+            spread: fraction of joint range to sample from (0.3 = middle 60%)
+        Returns:
+            The random arm configuration (7,)
+        """
+        mid = (self.arm_pos_lo + self.arm_pos_hi) / 2
+        half_range = (self.arm_pos_hi - self.arm_pos_lo) / 2 * spread
+        for _ in range(20):
+            q_start = rng.uniform(mid - half_range, mid + half_range)
+            q_start = np.clip(q_start, self.arm_pos_lo, self.arm_pos_hi)
+            self.data.qpos[self.arm_qpos_adr] = q_start
+            mujoco.mj_forward(self.model, self.data)
+            # Check hand is above table (not in collision)
+            if self.hand_pos[2] > 0.85:
+                return q_start
+        # Fallback: return zero config
+        self.data.qpos[self.arm_qpos_adr] = 0.0
+        mujoco.mj_forward(self.model, self.data)
+        return np.zeros(7)
 
     @property
     def hand_pos(self) -> np.ndarray:
@@ -259,56 +303,103 @@ class EpisodeRecorder:
 # Expert policies
 # ────────────────────────────────────────────────────────
 
-def generate_reach(sim: SimWrapper, rng: np.random.Generator) -> dict:
-    sim.reset_with_noise(rng)
-    cube = sim.cube_pos.copy()
-
-    # Plan: home → pre-reach (8cm above) → reach (just above cube)
-    waypoints = [
-        cube + np.array([0, 0, 0.08]),
-        cube + np.array([0, 0, 0.02]),
-    ]
-    return _kinematic_record(sim, rng, waypoints, [40, 25], hold=20)
-
-
-def generate_grasp(sim: SimWrapper, rng: np.random.Generator) -> dict:
-    sim.reset_with_noise(rng)
-    cube = sim.cube_pos.copy()
-    waypoints = [
-        cube + np.array([0, 0, 0.08]),
-        cube + np.array([0, 0, 0.02]),
-    ]
-    return _kinematic_record(sim, rng, waypoints, [40, 25], hold=20, grasp_after=True)
-
-
-def generate_pick(sim: SimWrapper, rng: np.random.Generator) -> dict:
-    sim.reset_with_noise(rng)
-    cube = sim.cube_pos.copy()
-    waypoints = [
-        cube + np.array([0, 0, 0.08]),
-        cube + np.array([0, 0, 0.02]),
-        cube + np.array([0, 0, 0.17]),  # lift
-    ]
-    return _kinematic_record(sim, rng, waypoints, [40, 25, 35],
-                              hold=20, grasp_after_wp=1)
+def generate_reach(sim: SimWrapper, rng: np.random.Generator,
+                   noise_range: float = 0.03, random_start: float = 0.0,
+                   domain_rand: bool = False) -> dict:
+    for _ in range(10):
+        sim.reset_with_noise(rng, noise_range=noise_range)
+        if random_start > 0:
+            sim.random_arm_start(rng, spread=random_start)
+        if domain_rand:
+            sim.randomizer.randomize(rng)
+        cube = sim.cube_pos.copy()
+        if noise_range > 0.05 and not sim.is_reachable(cube):
+            continue
+        # Plan: home → pre-reach (8cm above) → reach (just above cube)
+        waypoints = [
+            cube + np.array([0, 0, 0.08]),
+            cube + np.array([0, 0, 0.02]),
+        ]
+        result = _kinematic_record(sim, rng, waypoints, [40, 25], hold=20)
+        if result is not None:
+            return result
+    raise RuntimeError(f"generate_reach: failed after 10 attempts (noise_range={noise_range})")
 
 
-def generate_place(sim: SimWrapper, rng: np.random.Generator) -> dict:
+def generate_grasp(sim: SimWrapper, rng: np.random.Generator,
+                   noise_range: float = 0.03, random_start: float = 0.0,
+                   domain_rand: bool = False) -> dict:
+    for _ in range(10):
+        sim.reset_with_noise(rng, noise_range=noise_range)
+        if random_start > 0:
+            sim.random_arm_start(rng, spread=random_start)
+        if domain_rand:
+            sim.randomizer.randomize(rng)
+        cube = sim.cube_pos.copy()
+        if noise_range > 0.05 and not sim.is_reachable(cube):
+            continue
+        waypoints = [
+            cube + np.array([0, 0, 0.08]),
+            cube + np.array([0, 0, 0.02]),
+        ]
+        result = _kinematic_record(sim, rng, waypoints, [40, 25], hold=20, grasp_after=True)
+        if result is not None:
+            return result
+    raise RuntimeError(f"generate_grasp: failed after 10 attempts")
+
+
+def generate_pick(sim: SimWrapper, rng: np.random.Generator,
+                  noise_range: float = 0.03, random_start: float = 0.0,
+                  domain_rand: bool = False) -> dict:
+    for _ in range(10):
+        sim.reset_with_noise(rng, noise_range=noise_range)
+        if random_start > 0:
+            sim.random_arm_start(rng, spread=random_start)
+        if domain_rand:
+            sim.randomizer.randomize(rng)
+        cube = sim.cube_pos.copy()
+        if noise_range > 0.05 and not sim.is_reachable(cube):
+            continue
+        waypoints = [
+            cube + np.array([0, 0, 0.08]),
+            cube + np.array([0, 0, 0.02]),
+            cube + np.array([0, 0, 0.17]),  # lift
+        ]
+        result = _kinematic_record(sim, rng, waypoints, [40, 25, 35],
+                                    hold=20, grasp_after_wp=1)
+        if result is not None:
+            return result
+    raise RuntimeError(f"generate_pick: failed after 10 attempts")
+
+
+def generate_place(sim: SimWrapper, rng: np.random.Generator,
+                   noise_range: float = 0.03, random_start: float = 0.0,
+                   domain_rand: bool = False) -> dict:
     """Pick up cube, move to place target, lower and release."""
-    sim.reset_with_noise(rng)
-    cube = sim.cube_pos.copy()
-    place = sim.place_pos.copy()
-    # Waypoints: approach → descend → [GRASP] → lift → above target → lower → [RELEASE]
-    lift_z = max(cube[2], place[2]) + 0.13  # clearance above both positions
-    waypoints = [
-        cube + np.array([0, 0, 0.08]),       # above cube
-        cube + np.array([0, 0, 0.02]),       # at cube (grasp here)
-        np.array([cube[0], cube[1], lift_z]),  # lift
-        np.array([place[0], place[1], lift_z]),  # above target
-        place + np.array([0, 0, 0.02]),      # lower to target (release here)
-    ]
-    return _kinematic_record(sim, rng, waypoints, [35, 25, 25, 30, 25],
-                              hold=20, grasp_after_wp=1, release_after_wp=4)
+    for _ in range(10):
+        sim.reset_with_noise(rng, noise_range=noise_range)
+        if random_start > 0:
+            sim.random_arm_start(rng, spread=random_start)
+        if domain_rand:
+            sim.randomizer.randomize(rng)
+        cube = sim.cube_pos.copy()
+        place = sim.place_pos.copy()
+        if noise_range > 0.05 and not sim.is_reachable(cube):
+            continue
+        # Waypoints: approach → descend → [GRASP] → lift → above target → lower → [RELEASE]
+        lift_z = max(cube[2], place[2]) + 0.13  # clearance above both positions
+        waypoints = [
+            cube + np.array([0, 0, 0.08]),       # above cube
+            cube + np.array([0, 0, 0.02]),       # at cube (grasp here)
+            np.array([cube[0], cube[1], lift_z]),  # lift
+            np.array([place[0], place[1], lift_z]),  # above target
+            place + np.array([0, 0, 0.02]),      # lower to target (release here)
+        ]
+        result = _kinematic_record(sim, rng, waypoints, [35, 25, 25, 30, 25],
+                                    hold=20, grasp_after_wp=1, release_after_wp=4)
+        if result is not None:
+            return result
+    raise RuntimeError(f"generate_place: failed after 10 attempts")
 
 
 def _kinematic_record(sim: SimWrapper, rng: np.random.Generator,
@@ -333,7 +424,12 @@ def _kinematic_record(sim: SimWrapper, rng: np.random.Generator,
     # Pass 1: IK solve (pure kinematics — no physics)
     configs = [sim.arm_q.copy()]
     for wp in waypoints:
-        sim.solve_ik(wp)
+        converged = sim.solve_ik(wp)
+        if not converged:
+            # Check if we're close enough (soft tolerance)
+            err = np.linalg.norm(sim.hand_pos - wp)
+            if err > 0.05:
+                return None  # signal failure to caller
         configs.append(sim.arm_q.copy())
 
     # Interpolate joint trajectory
@@ -428,6 +524,12 @@ def main():
     parser.add_argument("--start-id", type=int, default=-1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--all-tasks", action="store_true")
+    parser.add_argument("--noise-range", type=float, default=0.03,
+                        help="Object position noise range in meters (default: 0.03)")
+    parser.add_argument("--random-start", type=float, default=0.0,
+                        help="Arm starting posture randomization spread (0=disabled, 0.3=moderate)")
+    parser.add_argument("--domain-rand", action="store_true",
+                        help="Enable visual domain randomization (Phase F)")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
@@ -455,7 +557,9 @@ def main():
 
         for i in range(args.episodes):
             t0 = time.time()
-            ep_data = gen_fn(sim, rng)
+            ep_data = gen_fn(sim, rng, noise_range=args.noise_range,
+                             random_start=args.random_start,
+                             domain_rand=args.domain_rand)
             n_frames = len(ep_data["action"])
             path = save_episode(ep_data, ep_id, task_label, output_dir)
             elapsed = time.time() - t0

@@ -39,8 +39,8 @@ logs/*
 tasks/ozkan_todo.md
 
 # Study notes — track .md files, ignore everything else
-study/*
-!study/*.md
+# study/*
+# !study/*.md
 
 # Demo data (large binary files)
 data/

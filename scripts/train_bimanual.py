@@ -24,10 +24,12 @@ import sys
 import time
 from pathlib import Path
 
+import random
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms as tvt
 
 try:
     import h5py
@@ -67,8 +69,14 @@ class BimanualDemoDataset(Dataset):
       action_chunk: (chunk_size, 14) float32
     """
 
-    def __init__(self, demos_dir: str, chunk_size: int = 20):
+    def __init__(self, demos_dir: str, chunk_size: int = 20, augment: bool = False,
+                 filter_success: bool = False):
         self.chunk_size = chunk_size
+        self.augment = augment
+        if augment:
+            self.color_jitter = tvt.ColorJitter(
+                brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05)
+            self.gaussian_blur = tvt.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
 
         ep_files = sorted(
             f for f in os.listdir(demos_dir) if f.endswith('.hdf5'))
@@ -80,9 +88,14 @@ class BimanualDemoDataset(Dataset):
 
         print(f"Loading {len(ep_files)} bimanual episodes from {demos_dir} ...")
 
+        skipped = 0
         for ep_idx, fname in enumerate(ep_files):
             path = os.path.join(demos_dir, fname)
             with h5py.File(path, 'r') as f:
+                # Skip failed episodes if filtering is enabled
+                if filter_success and not bool(f.attrs.get('success', True)):
+                    skipped += 1
+                    continue
                 positions = f['obs/joint_positions'][:]       # (T, 14)
                 velocities = f['obs/joint_velocities'][:]     # (T, 14)
                 actions = f['action'][:]                      # (T, 14)
@@ -109,6 +122,8 @@ class BimanualDemoDataset(Dataset):
             for t in range(T):
                 self.samples.append((ep_idx, t))
 
+        if skipped > 0:
+            print(f"  Skipped {skipped} failed episodes")
         total_frames = sum(ep['length'] for ep in self.episodes)
         print(f"  {len(self.episodes)} episodes, {len(self.samples)} samples, "
               f"avg {total_frames / len(self.episodes):.0f} frames/ep")
@@ -121,10 +136,27 @@ class BimanualDemoDataset(Dataset):
         ep = self.episodes[ep_idx]
         T = ep['length']
 
-        # Image
-        img = ep['images'][t].transpose(2, 0, 1).astype(np.float32) / 255.0
-        img = (img - _IMG_MEAN) / _IMG_STD
-        img = torch.from_numpy(img)
+        # Image: uint8 (224,224,3) → float32 (3,224,224), ImageNet-normalized
+        img_uint8 = ep['images'][t]  # (224, 224, 3) uint8
+
+        if self.augment:
+            # Convert to tensor [0,1] for torchvision transforms
+            img_t = torch.from_numpy(img_uint8.transpose(2, 0, 1).copy()).float() / 255.0
+            img_t = self.color_jitter(img_t)
+            if random.random() < 0.3:
+                img_t = self.gaussian_blur(img_t)
+            # Random resized crop: simulate small camera shifts
+            if random.random() < 0.5:
+                i, j, h, w = tvt.RandomResizedCrop.get_params(
+                    img_t, scale=(0.85, 1.0), ratio=(0.95, 1.05))
+                img_t = tvt.functional.resized_crop(img_t, i, j, h, w, [224, 224])
+            # ImageNet normalize
+            img = (img_t.numpy() - _IMG_MEAN) / _IMG_STD
+            img = torch.from_numpy(img)
+        else:
+            img = img_uint8.transpose(2, 0, 1).astype(np.float32) / 255.0
+            img = (img - _IMG_MEAN) / _IMG_STD
+            img = torch.from_numpy(img)
 
         # State: 14 pos + 14 vel = 28
         state = np.concatenate([ep['positions'][t], ep['velocities'][t]])
@@ -180,13 +212,19 @@ def main():
     parser.add_argument("--resume", default="")
     parser.add_argument("--device",
                         default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--no-augment", action="store_true",
+                        help="Disable image augmentation")
+    parser.add_argument("--filter-success", action="store_true",
+                        help="Skip episodes marked as failed (success=False in HDF5 attrs)")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Dataset ──
-    dataset = BimanualDemoDataset(args.demos, chunk_size=args.chunk_size)
+    dataset = BimanualDemoDataset(args.demos, chunk_size=args.chunk_size,
+                                  augment=not args.no_augment,
+                                  filter_success=args.filter_success)
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,

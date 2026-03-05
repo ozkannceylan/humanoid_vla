@@ -327,3 +327,39 @@ requests to limit data flow to external clients.
 page loads. At 15fps with 640×480 side-by-side, a 10-second clip is ~1MB with mp4v codec.
 **Rule:** Target 1-2MB per clip. Use 15fps not 30fps, capture every other sim step,
 keep episodes under 10 seconds.
+
+# Phase F — Lessons Learned
+
+---
+
+## L041: ±3cm noise is trajectory replay, not generalization
+**Discovery:** With box position noise of only ±3cm, the red cube appears at nearly identical
+pixel coordinates in every episode. ResNet18 trivially memorizes "red blob at pixel ~(320,380)"
+rather than learning to visually locate objects.
+**Rule:** Use ±10cm+ noise for meaningful visual variation. Verify by checking that the object
+spans >50% of the image width across demo episodes.
+
+## L042: Always start training-side augmentation first (cheapest win)
+**Discovery:** Image augmentation (ColorJitter, blur, random crop) in DemoDataset.__getitem__
+costs <5% training overhead but provides immediate visual robustness without regenerating demos.
+**Rule:** Add torchvision augmentations before investing in expensive simulation-side changes.
+Use `augment=True` default in training scripts, `--no-augment` to disable.
+
+## L043: Torchvision transforms alias `T` collides with episode length `T`
+**Discovery:** `from torchvision import transforms as T` creates a naming collision with the
+common pattern `T = ep['length']` used inside dataset __getitem__ methods.
+**Rule:** Use `tvt` as the import alias for torchvision transforms, never `T`.
+
+## L044: MuJoCo model attributes are mutable at runtime for visual randomization
+**Discovery:** `model.geom_rgba`, `model.light_pos`, `model.cam_pos`, `model.body_pos` etc.
+can all be modified between episodes without reloading XML.
+**Rule:** Use runtime model attribute modification for domain randomization instead of
+multiple XML scene files. Create a DomainRandomizer class that saves nominal values
+and restores them via `restore()` method.
+
+## L045: IK retry loop needed for wider position ranges
+**Discovery:** With ±10cm box noise, some positions are at the edge of the workspace where
+IK fails to converge. The old code silently ignored IK failures.
+**Rule:** `_kinematic_record` returns `None` on IK failure (error > 5cm). Expert generators
+retry up to 10 times with new random positions. Add `is_reachable` pre-check (< 0.40m
+from shoulder) to skip obviously unreachable positions early.

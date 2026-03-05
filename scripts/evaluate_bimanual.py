@@ -55,9 +55,13 @@ MIN_FORCE_N = 2.0        # minimum contact force on each palm
 
 def evaluate_episode(model, sim, rng, device='cuda',
                      max_steps=MAX_STEPS, chunk_exec=CHUNK_EXEC,
-                     ensemble_k=ENSEMBLE_K, verbose=False):
+                     ensemble_k=ENSEMBLE_K, verbose=False,
+                     noise_x=0.02, noise_y=0.02,
+                     random_start=0.0):
     """Run one bimanual episode. Returns dict with metrics."""
-    sim.reset_with_noise(rng)
+    sim.reset_with_noise(rng, noise_x=noise_x, noise_y=noise_y)
+    if random_start > 0:
+        sim.random_arm_start(rng, arm='both', spread=random_start)
     box_init_z = sim.box_pos[2]
 
     chunk_size = model.chunk_size

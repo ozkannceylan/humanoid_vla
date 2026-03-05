@@ -46,6 +46,7 @@ from physics_sim import (
     PhysicsSim, LEFT_ARM_CTRL, RIGHT_ARM_CTRL, BOTH_ARMS_CTRL,
     CONTROL_HZ,
 )
+from domain_randomization import DomainRandomizer
 
 # ────────────────────────────────────────────────────────
 # Constants
@@ -88,7 +89,9 @@ def interpolate(q0: np.ndarray, q1: np.ndarray, n_frames: int) -> np.ndarray:
 
 
 def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
-                             rng: np.random.Generator) -> dict:
+                             rng: np.random.Generator,
+                             q_home_L: np.ndarray = None,
+                             q_home_R: np.ndarray = None) -> dict:
     """Solve IK for all waypoints and build joint-space trajectories.
 
     Returns dict with:
@@ -120,7 +123,8 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
 
     # Solve IK sequentially (each uses previous as seed)
     # Left arm chain
-    q_home_L = np.zeros(7)
+    if q_home_L is None:
+        q_home_L = np.zeros(7)
     sim.data.qpos[sim.left_arm_qpos_adr] = q_home_L
     mujoco.mj_forward(sim.model, sim.data)
 
@@ -137,7 +141,8 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
     q_lft_L = sim.left_arm_q.copy()
 
     # Right arm chain
-    q_home_R = np.zeros(7)
+    if q_home_R is None:
+        q_home_R = np.zeros(7)
     sim.data.qpos[sim.right_arm_qpos_adr] = q_home_R
     mujoco.mj_forward(sim.model, sim.data)
 
@@ -197,17 +202,31 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
 # Episode generation
 # ────────────────────────────────────────────────────────
 
-def generate_episode(sim: PhysicsSim, rng: np.random.Generator) -> dict:
+def generate_episode(sim: PhysicsSim, rng: np.random.Generator,
+                     noise_x: float = 0.02, noise_y: float = 0.02,
+                     random_start: float = 0.0,
+                     domain_rand: bool = False) -> dict:
     """Generate one bimanual box manipulation episode.
 
     Returns dict with HDF5 data arrays + metadata.
     """
     # Reset with noise on box position
-    sim.reset_with_noise(rng)
+    sim.reset_with_noise(rng, noise_x=noise_x, noise_y=noise_y)
     box_pos = sim.box_pos.copy()
 
+    q_home_L = None
+    q_home_R = None
+    if random_start > 0:
+        q_home_L, q_home_R = sim.random_arm_start(rng, arm='both', spread=random_start)
+
+    if domain_rand:
+        if not hasattr(sim, 'randomizer'):
+            sim.randomizer = DomainRandomizer(sim.model, sim.data)
+        sim.randomizer.randomize(rng)
+
     # Plan trajectory
-    plan = plan_bimanual_trajectory(sim, box_pos, rng)
+    plan = plan_bimanual_trajectory(sim, box_pos, rng,
+                                     q_home_L=q_home_L, q_home_R=q_home_R)
     left_traj = plan["left_traj"]
     right_traj = plan["right_traj"]
     n_frames = plan["n_frames"]
@@ -326,6 +345,14 @@ def main():
                         help="Output directory")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--start-id", type=int, default=0)
+    parser.add_argument("--noise-x", type=float, default=0.02,
+                        help="Box X position noise range (default: 0.02)")
+    parser.add_argument("--noise-y", type=float, default=0.02,
+                        help="Box Y position noise range (default: 0.02)")
+    parser.add_argument("--random-start", type=float, default=0.0,
+                        help="Arm starting posture randomization spread (0=disabled, 0.25=moderate)")
+    parser.add_argument("--domain-rand", action="store_true",
+                        help="Enable visual domain randomization")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
@@ -344,7 +371,9 @@ def main():
 
     for i in range(args.episodes):
         t0 = time.time()
-        ep_data = generate_episode(sim, rng)
+        ep_data = generate_episode(sim, rng, noise_x=args.noise_x, noise_y=args.noise_y,
+                                   random_start=args.random_start,
+                                   domain_rand=args.domain_rand)
         meta = ep_data["meta"]
 
         path = save_episode(ep_data, ep_id, output_dir)

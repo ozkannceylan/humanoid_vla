@@ -74,13 +74,16 @@ def main():
     parser.add_argument("--resume", default="",
                         help="Path to checkpoint to resume from")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--no-augment", action="store_true",
+                        help="Disable image augmentation")
     args = parser.parse_args()
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Dataset ──
-    dataset = DemoDataset(args.demos, chunk_size=args.chunk_size)
+    dataset = DemoDataset(args.demos, chunk_size=args.chunk_size,
+                          augment=not args.no_augment)
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,

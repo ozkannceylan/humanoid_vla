@@ -22,10 +22,12 @@ References:
 """
 
 import os
+import random
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
+from torchvision import transforms as tvt
 from torchvision.models import resnet18, ResNet18_Weights
 
 try:
@@ -81,8 +83,13 @@ class DemoDataset(Dataset):
       action_chunk: (chunk_size, 29) float32 tensor
     """
 
-    def __init__(self, demos_dir: str, chunk_size: int = 20):
+    def __init__(self, demos_dir: str, chunk_size: int = 20, augment: bool = False):
         self.chunk_size = chunk_size
+        self.augment = augment
+        if augment:
+            self.color_jitter = tvt.ColorJitter(
+                brightness=0.3, contrast=0.3, saturation=0.2, hue=0.05)
+            self.gaussian_blur = tvt.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0))
 
         ep_files = sorted(
             f for f in os.listdir(demos_dir)
@@ -139,9 +146,26 @@ class DemoDataset(Dataset):
         T = ep['length']
 
         # Image: uint8 (224,224,3) → float32 (3,224,224), ImageNet-normalized
-        img = ep['images'][t].transpose(2, 0, 1).astype(np.float32) / 255.0
-        img = (img - _IMG_MEAN) / _IMG_STD
-        img = torch.from_numpy(img)
+        img_uint8 = ep['images'][t]  # (224, 224, 3) uint8
+
+        if self.augment:
+            # Convert to tensor [0,1] for torchvision transforms
+            img_t = torch.from_numpy(img_uint8.transpose(2, 0, 1).copy()).float() / 255.0
+            img_t = self.color_jitter(img_t)
+            if random.random() < 0.3:
+                img_t = self.gaussian_blur(img_t)
+            # Random resized crop: simulate small camera shifts
+            if random.random() < 0.5:
+                i, j, h, w = tvt.RandomResizedCrop.get_params(
+                    img_t, scale=(0.85, 1.0), ratio=(0.95, 1.05))
+                img_t = tvt.functional.resized_crop(img_t, i, j, h, w, [224, 224])
+            # ImageNet normalize
+            img = (img_t.numpy() - _IMG_MEAN) / _IMG_STD
+            img = torch.from_numpy(img)
+        else:
+            img = img_uint8.transpose(2, 0, 1).astype(np.float32) / 255.0
+            img = (img - _IMG_MEAN) / _IMG_STD
+            img = torch.from_numpy(img)
 
         # State: 29 pos + 29 vel = 58
         state = np.concatenate([ep['positions'][t], ep['velocities'][t]])
