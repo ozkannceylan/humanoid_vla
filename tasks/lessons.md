@@ -363,3 +363,42 @@ IK fails to converge. The old code silently ignored IK failures.
 **Rule:** `_kinematic_record` returns `None` on IK failure (error > 5cm). Expert generators
 retry up to 10 times with new random positions. Add `is_reachable` pre-check (< 0.40m
 from shoulder) to skip obviously unreachable positions early.
+
+## L046: Never train on failed demos — filter by success attribute
+**Discovery:** Phase F bimanual training used 50 demos where 23 (46%) were failures (box
+fell off table, lift=-80cm). Model trained on garbage trajectories performed WORSE than
+the baseline (35% vs 50% in-dist, 20% vs 30% OOD).
+**Rule:** Always store `success` flag in HDF5 attrs during demo generation. Use
+`--filter-success` flag in training scripts to skip failed episodes. Verify success rate
+before training: if <70%, fix the expert first — don't train on garbage data.
+
+## L047: Bimanual IK failures cascade — always check return values
+**Discovery:** `solve_ik_left/right` returns False when target is unreachable, but
+`generate_bimanual_demos.py` ignored the return value and copied the bad joint config.
+This bad config then seeded the next waypoint's IK, compounding errors. By squeeze phase,
+hands were 5-10cm away from the box → zero contact → failure.
+**Rule:** Always check IK return values. If any waypoint IK fails, skip the episode
+entirely or retry with different parameters. Never seed next waypoint from a failed solution.
+
+## L048: Random arm start must check reachability to box, not just hand height
+**Discovery:** `random_arm_start()` only validated `hand_z > 0.85m` but didn't check if
+the arm could actually reach the box position from that config. Arms could end up "twisted"
+with poor lateral reach, causing all subsequent IK to fail.
+**Rule:** After sampling random arm start, verify that the hand-to-box distance is within
+reach (< 0.40m) or that a quick IK test can converge. Reject configs that create
+unreachable starting states.
+
+## L049: Asymmetric bilateral forces push box off table during approach
+**Discovery:** When one hand contacts the box before the other during the squeeze approach,
+the unbalanced PD force (Kp=40, error up to 10cm → 25+ Nm) pushes the box sideways.
+14/73 failures were the box sliding off the table edge.
+**Rule:** For bimanual approach, either: (1) reduce Kp during approach to soften contact,
+(2) ensure simultaneous contact by coordinating approach speeds, or (3) add a
+pre-contact slowdown phase.
+
+## L050: Start with moderate randomization, progressively increase
+**Discovery:** Jumping from ±2cm to ±8cm/±6cm + spread=0.25 + domain_rand crashed the
+scripted expert success rate from ~100% to ~50%. Training on half-garbage data was useless.
+**Rule:** Increase randomization incrementally: ±5cm first (target >85% expert success),
+train model, verify improvement, then push to ±8cm. Each step should degrade expert
+success by at most 15-20%.

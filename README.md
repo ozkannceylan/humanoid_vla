@@ -2,8 +2,9 @@
 
 A simulated **Unitree G1 humanoid robot** controlled by a Vision-Language-Action (VLA) model, commandable via natural language. The robot sees through an egocentric camera, understands task commands like *"pick up the red cube"*, and generates joint-level motor commands through a trained **ACT (Action Chunking with Transformers)** model.
 
-> **Status:** Simulation complete — Phases A–E  
-> **Author:** Özkan Ceylan
+> **Status:** Simulation complete — Phases A–F (Domain Randomization & Generalization)
+> **Author:** Ozkan Ceylan
+> **Full Report:** [PROJECT_REPORT.md](PROJECT_REPORT.md)
 
 ---
 
@@ -181,6 +182,20 @@ Key inference techniques:
 2. **Hierarchical task decomposition** — composite tasks switch task embedding at grasp trigger
 3. **Re-grasp prevention** — `released` flag prevents re-triggering after intentional release
 
+### Generalization (Phase F — Domain Randomization)
+
+Bimanual model trained with position randomization (+/-5cm), random arm starts, and visual domain randomization. Evaluated on out-of-distribution conditions never seen during training:
+
+| Test Distribution | Success | Description |
+|-------------------|---------|-------------|
+| **In-distribution** | **90%** | Same ranges as training, different seeds |
+| **OOD Position** (1.5x) | **80%** | Wider object positions |
+| **OOD Visual** | **70%** | Novel table/light colors |
+| **OOD Posture** (1.5x) | **60%** | Wider starting arm configs |
+| **OOD Combined** | **55%** | All OOD factors simultaneously |
+
+Graceful degradation from 90% to 55% demonstrates real generalization — the model handles unseen conditions rather than catastrophically failing.
+
 ---
 
 ## ROS2 Integration (Phase D)
@@ -293,6 +308,10 @@ humanoid_vla/
 │   ├── generate_demos.py              # Single-arm scripted expert (IK + weld)
 │   ├── generate_bimanual_demos.py     # Bimanual demo generator (friction)
 │   ├── physics_sim.py                 # Physics wrapper (mj_step, PD, contacts)
+│   ├── domain_randomization.py        # Runtime visual domain randomization
+│   ├── eval_generalization.py         # OOD generalization evaluation
+│   ├── visualize_configs.py           # Render randomization grid
+│   ├── visualize_perception_action.py # Trajectory strip visualization
 │   ├── live_demo.py                   # Interactive viewer (single-arm)
 │   ├── live_bimanual.py               # Interactive viewer (bimanual)
 │   ├── record_demo_videos.py          # Generate demo clips for README
@@ -331,7 +350,7 @@ humanoid_vla/
 │
 ├── tasks/                             # Project management
 │   ├── todo.md                        # Phase tracker with milestones
-│   └── lessons.md                     # Engineering lessons (L001-L031)
+│   └── lessons.md                     # Engineering lessons (L001-L050)
 │
 └── logs/                              # Training logs
     └── act_training_300ep.log
@@ -350,16 +369,19 @@ humanoid_vla/
 | 03 | [ACT Training & Evaluation](study/03_act_training_and_evaluation.md) | ACT architecture, action chunking, ResNet18 encoder, task embedding, Transformer decoder, training, evaluation debugging |
 | 04 | [Bimanual Physics Grasping](study/04_bimanual_physics_grasping.md) | mj_step vs mj_forward, PD torque control, contact physics, friction cones, compliance grasping, bimanual coordination |
 | 05 | [System Integration](study/05_system_integration.md) | ROS2 Task Manager, NL parsing, rosbridge WebSocket, thread-safe execution, temporal ensembling, full data flow |
+| 06 | [Domain Randomization](study/06_domain_randomization_and_generalization.md) | Visual augmentation, position noise, posture variation, generalization evaluation, ablation study |
 
 ### Engineering Lessons
 
-[tasks/lessons.md](tasks/lessons.md) — 31 concise lessons learned:
+[tasks/lessons.md](tasks/lessons.md) — 50 concise lessons learned:
 - L001–L008: Environment setup (torque actuators, meshdir, ROS2 Jazzy)
 - L009–L012: Phase B infrastructure (gravity comp, setuptools, cv_bridge)
 - L013–L016: Demo generation (ctrlrange, arm reach, kinematic IK, weld)
 - L017–L023: ACT training (standalone, action chunking, frozen ResNet, auto-grasp)
 - L024–L027: Evaluation (temporal ensembling, hierarchical decomposition, re-grasp)
-- L028–L031: Bimanual physics (leg drift freeze, palm pad, IK, box rotation)
+- L028–L033: Bimanual physics (leg drift, palm pad, IK, compliance grasping)
+- L034–L040: ROS2 integration (String+JSON, daemon threads, launch files)
+- L041–L050: Domain randomization (memorization, IK validation, progressive difficulty)
 
 ---
 
@@ -373,6 +395,7 @@ humanoid_vla/
 | **C2** — Bimanual | ✅ | 2 weeks | Physics-based bimanual grasping, 100% success |
 | **D** — Integration | ✅ | 1 week | ROS2 Task Manager, NL commands, rosbridge |
 | **E** — Polish | ✅ | 1 week | Demo videos, documentation, study docs |
+| **F** — Generalization | ✅ | 1 week | Domain randomization, OOD evaluation, 90% in-dist / 55% OOD |
 
 ---
 

@@ -227,15 +227,20 @@ class PhysicsSim:
         mujoco.mj_forward(self.model, self.data)
 
     def random_arm_start(self, rng: np.random.Generator, arm: str = 'both',
-                         spread: float = 0.25) -> tuple:
+                         spread: float = 0.25,
+                         reach_target: np.ndarray = None) -> tuple:
         """Set arm(s) to random valid starting configurations.
 
         Args:
             arm: 'left', 'right', or 'both'
             spread: fraction of joint range to sample from
+            reach_target: if provided, reject configs where hand is >0.38m
+                         from this target (ensures IK can reach the box)
         Returns:
             Tuple of (left_q, right_q) arrays
         """
+        max_reach = 0.38  # conservative reach limit
+
         def _sample_arm(qpos_adr, lo, hi, hand_site_id):
             mid = (lo + hi) / 2
             half_range = (hi - lo) / 2 * spread
@@ -244,9 +249,16 @@ class PhysicsSim:
                 q = np.clip(q, lo, hi)
                 self.data.qpos[qpos_adr] = q
                 mujoco.mj_forward(self.model, self.data)
-                hand_z = self.data.site_xpos[hand_site_id, 2]
-                if hand_z > 0.85:
-                    return q
+                hand_pos = self.data.site_xpos[hand_site_id]
+                hand_z = hand_pos[2]
+                if hand_z <= 0.85:
+                    continue
+                # Check reachability to target if provided
+                if reach_target is not None:
+                    dist = np.linalg.norm(hand_pos - reach_target)
+                    if dist > max_reach:
+                        continue
+                return q
             # Fallback
             self.data.qpos[qpos_adr] = 0.0
             mujoco.mj_forward(self.model, self.data)

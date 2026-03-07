@@ -119,8 +119,9 @@ class BimanualDemoDataset(Dataset):
                 'length': T,
             })
 
+            actual_idx = len(self.episodes) - 1
             for t in range(T):
-                self.samples.append((ep_idx, t))
+                self.samples.append((actual_idx, t))
 
         if skipped > 0:
             print(f"  Skipped {skipped} failed episodes")

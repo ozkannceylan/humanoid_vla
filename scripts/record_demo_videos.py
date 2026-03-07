@@ -11,6 +11,7 @@ Output files:
   media/pick.mp4     — Pick up the red cube
   media/place.mp4    — Place the red cube on the blue plate
   media/bimanual.mp4 — Pick up the green box with both hands
+  media/bimanual_adaptability.mp4 — 4 episodes with varied conditions
   media/all_tasks.mp4 — Combined montage of all tasks
 
 Usage:
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from act_model import ACTPolicy, TASK_LABELS, task_to_id
 from generate_demos import SimWrapper, RIGHT_ARM_CTRL, CAMERA_NAME
 from physics_sim import PhysicsSim, LEFT_ARM_CTRL as BM_LEFT_CTRL, RIGHT_ARM_CTRL as BM_RIGHT_CTRL
+from domain_randomization import DomainRandomizer
 
 SCENE_CAMERA = "scene_camera"
 RENDER_W, RENDER_H = 640, 480
@@ -194,9 +196,17 @@ def record_single_arm_episode(model, sim, task_label, rng, device='cuda',
 # ── Bimanual episode recording ────────────────────────
 
 def record_bimanual_episode(model, sim, task_label, rng, device='cuda',
-                             max_steps=250, chunk_exec=5, ensemble_k=0.01):
+                             max_steps=250, chunk_exec=5, ensemble_k=0.01,
+                             noise_x=0.02, noise_y=0.02, randomizer=None,
+                             arm_spread=0.0):
     """Run bimanual episode and return list of composed frames."""
-    sim.reset_with_noise(rng)
+    sim.reset_with_noise(rng, noise_x=noise_x, noise_y=noise_y)
+    if arm_spread > 0:
+        sim.random_arm_start(rng, arm='both', spread=arm_spread,
+                             reach_target=sim.box_pos)
+    if randomizer is not None:
+        randomizer.randomize(rng)
+        mujoco.mj_forward(sim.model, sim.data)
     box_init_z = sim.box_pos[2]
     chunk_size = model.chunk_size
     action_dim = model.action_dim
@@ -245,6 +255,53 @@ def record_bimanual_episode(model, sim, task_label, rng, device='cuda',
     return frames
 
 
+# ── Multi-episode bimanual adaptability demo ──────────
+
+def record_bimanual_adaptability(model, sim, rng, device='cuda',
+                                  n_episodes=4, max_steps=250):
+    """Record multiple bimanual episodes with varied conditions.
+
+    Shows the model adapting to different box positions, visual environments,
+    and arm starting poses — demonstrating generalization.
+    """
+    randomizer = DomainRandomizer(sim.model, sim.data)
+    canvas_h = RENDER_H + 40
+    canvas_w = RENDER_W * 2
+    all_frames = []
+
+    configs = [
+        {"noise_x": 0.00, "noise_y": 0.00, "arm_spread": 0.0,
+         "visual": False, "label": "Nominal"},
+        {"noise_x": 0.05, "noise_y": 0.04, "arm_spread": 0.15,
+         "visual": True, "label": "Randomized Position + Visual"},
+        {"noise_x": 0.04, "noise_y": 0.03, "arm_spread": 0.10,
+         "visual": True, "label": "Different Start + Colors"},
+        {"noise_x": 0.05, "noise_y": 0.05, "arm_spread": 0.15,
+         "visual": True, "label": "Full Domain Randomization"},
+    ]
+
+    for i, cfg in enumerate(configs[:n_episodes]):
+        print(f"  Episode {i+1}/{n_episodes}: {cfg['label']}")
+        randomizer.restore()
+
+        frames = record_bimanual_episode(
+            model, sim, f"Bimanual Grasp — {cfg['label']}", rng,
+            device=device, max_steps=max_steps,
+            noise_x=cfg["noise_x"], noise_y=cfg["noise_y"],
+            randomizer=randomizer if cfg["visual"] else None,
+            arm_spread=cfg["arm_spread"])
+        frames = add_success_overlay(frames, n_hold=10)
+
+        # Title card for this episode
+        all_frames.extend(make_title_card(
+            f"Episode {i+1}: {cfg['label']}", canvas_w, canvas_h, frames=12))
+        all_frames.extend(frames)
+
+        randomizer.restore()
+
+    return all_frames
+
+
 # ── Video writer ──────────────────────────────────────
 
 def write_video(path, frames, fps=FPS):
@@ -279,8 +336,8 @@ def main():
     parser = argparse.ArgumentParser(description="Record demo videos for README")
     parser.add_argument("--sa-checkpoint", default="data/checkpoints/best.pt",
                         help="Single-arm ACT model")
-    parser.add_argument("--bm-checkpoint", default="data/bimanual_checkpoints/best.pt",
-                        help="Bimanual ACT model")
+    parser.add_argument("--bm-checkpoint", default="data/bimanual_checkpoints_phase_f2/best.pt",
+                        help="Bimanual ACT model (Phase F2)")
     parser.add_argument("--output-dir", default="media",
                         help="Output directory for video files")
     parser.add_argument("--seed", type=int, default=42)
@@ -342,20 +399,32 @@ def main():
 
     sa_sim.renderer.close()
 
-    # ── Bimanual task ───────────────────────────────────
-    print(f"\nRecording: pick up the green box with both hands")
+    # ── Bimanual task (adaptability demo) ─────────────
+    print(f"\nRecording: bimanual adaptability demo (4 episodes)")
     bm_sim = PhysicsSim()
+
+    # Single nominal episode
     bm_frames = record_bimanual_episode(
         bm_model, bm_sim, "pick up the green box with both hands",
         rng, device=args.device)
     bm_frames = add_success_overlay(bm_frames)
-
     clip_path = os.path.join(args.output_dir, "bimanual.mp4")
     write_video(clip_path, bm_frames)
 
     all_frames.extend(make_title_card(
         "BIMANUAL: LIFT GREEN BOX", canvas_w, canvas_h, frames=15))
     all_frames.extend(bm_frames)
+
+    # Multi-episode adaptability video
+    adapt_frames = record_bimanual_adaptability(
+        bm_model, bm_sim, rng, device=args.device, n_episodes=4)
+    adapt_path = os.path.join(args.output_dir, "bimanual_adaptability.mp4")
+    write_video(adapt_path, adapt_frames)
+
+    all_frames.extend(make_title_card(
+        "ADAPTABILITY DEMO", canvas_w, canvas_h, frames=15))
+    all_frames.extend(adapt_frames)
+
     bm_sim.renderer.close()
 
     # ── Combined montage ────────────────────────────────

@@ -91,7 +91,7 @@ def interpolate(q0: np.ndarray, q1: np.ndarray, n_frames: int) -> np.ndarray:
 def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
                              rng: np.random.Generator,
                              q_home_L: np.ndarray = None,
-                             q_home_R: np.ndarray = None) -> dict:
+                             q_home_R: np.ndarray = None) -> dict | None:
     """Solve IK for all waypoints and build joint-space trajectories.
 
     Returns dict with:
@@ -99,6 +99,8 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
       right_traj: (T, 7) right arm joint targets
       phase_ends: list of frame indices where each phase ends
       n_frames:   total number of frames
+
+    Returns None if any IK solution fails (unreachable target).
     """
     # Timing with slight random variation (±10%)
     def vary(base):
@@ -128,17 +130,16 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
     sim.data.qpos[sim.left_arm_qpos_adr] = q_home_L
     mujoco.mj_forward(sim.model, sim.data)
 
-    sim.solve_ik_left(pre_L)
-    q_pre_L = sim.left_arm_q.copy()
-
-    sim.solve_ik_left(app_L)
-    q_app_L = sim.left_arm_q.copy()
-
-    sim.solve_ik_left(sq_L)
-    q_sq_L = sim.left_arm_q.copy()
-
-    sim.solve_ik_left(lft_L)
-    q_lft_L = sim.left_arm_q.copy()
+    ik_targets_L = [("pre_L", pre_L), ("app_L", app_L),
+                    ("sq_L", sq_L), ("lft_L", lft_L)]
+    ik_results_L = []
+    for name, target in ik_targets_L:
+        ok = sim.solve_ik_left(target)
+        if not ok:
+            err = np.linalg.norm(target - sim.left_hand_pos)
+            return None  # IK failed — skip this episode
+        ik_results_L.append(sim.left_arm_q.copy())
+    q_pre_L, q_app_L, q_sq_L, q_lft_L = ik_results_L
 
     # Right arm chain
     if q_home_R is None:
@@ -146,17 +147,16 @@ def plan_bimanual_trajectory(sim: PhysicsSim, box_pos: np.ndarray,
     sim.data.qpos[sim.right_arm_qpos_adr] = q_home_R
     mujoco.mj_forward(sim.model, sim.data)
 
-    sim.solve_ik_right(pre_R)
-    q_pre_R = sim.right_arm_q.copy()
-
-    sim.solve_ik_right(app_R)
-    q_app_R = sim.right_arm_q.copy()
-
-    sim.solve_ik_right(sq_R)
-    q_sq_R = sim.right_arm_q.copy()
-
-    sim.solve_ik_right(lft_R)
-    q_lft_R = sim.right_arm_q.copy()
+    ik_targets_R = [("pre_R", pre_R), ("app_R", app_R),
+                    ("sq_R", sq_R), ("lft_R", lft_R)]
+    ik_results_R = []
+    for name, target in ik_targets_R:
+        ok = sim.solve_ik_right(target)
+        if not ok:
+            err = np.linalg.norm(target - sim.right_hand_pos)
+            return None  # IK failed — skip this episode
+        ik_results_R.append(sim.right_arm_q.copy())
+    q_pre_R, q_app_R, q_sq_R, q_lft_R = ik_results_R
 
     # Build trajectories by interpolating between waypoints
     segments_L = [
@@ -217,16 +217,24 @@ def generate_episode(sim: PhysicsSim, rng: np.random.Generator,
     q_home_L = None
     q_home_R = None
     if random_start > 0:
-        q_home_L, q_home_R = sim.random_arm_start(rng, arm='both', spread=random_start)
+        # Pass box position so random_arm_start rejects unreachable configs
+        q_home_L, q_home_R = sim.random_arm_start(
+            rng, arm='both', spread=random_start, reach_target=box_pos)
 
     if domain_rand:
         if not hasattr(sim, 'randomizer'):
             sim.randomizer = DomainRandomizer(sim.model, sim.data)
         sim.randomizer.randomize(rng)
 
-    # Plan trajectory
+    # Plan trajectory (returns None if IK fails)
     plan = plan_bimanual_trajectory(sim, box_pos, rng,
                                      q_home_L=q_home_L, q_home_R=q_home_R)
+    if plan is None:
+        # Restore domain rand if needed and signal failure
+        if domain_rand and hasattr(sim, 'randomizer'):
+            sim.randomizer.restore()
+        return None  # caller should retry
+
     left_traj = plan["left_traj"]
     right_traj = plan["right_traj"]
     n_frames = plan["n_frames"]
@@ -366,14 +374,30 @@ def main():
     sim = PhysicsSim()
 
     successes = 0
+    ik_failures = 0
+    physics_failures = 0
     ep_id = args.start_id
     t_start = time.time()
+    max_retries = 5  # retry IK failures with new random params
 
     for i in range(args.episodes):
         t0 = time.time()
-        ep_data = generate_episode(sim, rng, noise_x=args.noise_x, noise_y=args.noise_y,
-                                   random_start=args.random_start,
-                                   domain_rand=args.domain_rand)
+
+        # Retry loop for IK failures
+        ep_data = None
+        for attempt in range(max_retries):
+            ep_data = generate_episode(
+                sim, rng, noise_x=args.noise_x, noise_y=args.noise_y,
+                random_start=args.random_start,
+                domain_rand=args.domain_rand)
+            if ep_data is not None:
+                break
+            ik_failures += 1
+
+        if ep_data is None:
+            print(f"  [{i+1}/{args.episodes}] SKIPPED — IK failed {max_retries} times")
+            continue
+
         meta = ep_data["meta"]
 
         path = save_episode(ep_data, ep_id, output_dir)
@@ -382,6 +406,8 @@ def main():
         status = "OK" if meta["success"] else "FAIL"
         if meta["success"]:
             successes += 1
+        else:
+            physics_failures += 1
 
         print(f"  [{i+1}/{args.episodes}] ep_{ep_id:04d} — "
               f"{meta['n_frames']} frames ({meta['n_frames']/CONTROL_HZ:.1f}s) — "
@@ -391,10 +417,15 @@ def main():
         ep_id += 1
 
     total_time = time.time() - t_start
-    rate = successes / args.episodes * 100
+    saved = successes + physics_failures
+    rate = successes / saved * 100 if saved > 0 else 0
 
-    print(f"\nDone. {args.episodes} episodes in {total_time:.0f}s")
-    print(f"Success: {successes}/{args.episodes} ({rate:.0f}%)")
+    print(f"\nDone. {args.episodes} requested, {saved} saved in {total_time:.0f}s")
+    print(f"Success: {successes}/{saved} ({rate:.0f}%)")
+    if ik_failures > 0:
+        print(f"IK failures (retried): {ik_failures}")
+    if physics_failures > 0:
+        print(f"Physics failures (saved): {physics_failures}")
     print(f"Output: {output_dir.absolute()}")
 
 
