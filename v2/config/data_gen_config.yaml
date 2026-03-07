@@ -1,0 +1,70 @@
+# v2/config/data_gen_config.yaml — Bimanual physics-based box manipulation
+# Full mj_step simulation with PD control and friction-only grasping
+
+env:
+  physics_hz: 500          # mj_step timestep = 1/500 = 0.002s
+  control_freq: 30         # action output rate, Hz
+  substeps: 16             # physics steps per control step (500/30 ≈ 16)
+  camera:
+    ego:
+      name: ego_camera
+      resolution: [480, 640]
+
+# Box target properties (nominal values, randomised per episode)
+box:
+  nominal_mass: 0.30       # kg
+  nominal_friction: 1.5    # tangent friction coefficient
+  position_noise_x: 0.03   # metres, uniform ±
+  position_noise_y: 0.03
+
+# Domain randomization ranges
+randomization:
+  box:
+    mass_range: [0.20, 0.50]
+    friction_range: [1.0, 2.0]
+    hue_range: [0.28, 0.42]      # keep it greenish (HSV hue)
+    saturation_range: [0.5, 1.0]
+    brightness_range: [0.4, 0.8]
+  table:
+    colors: ["wood_light", "wood_dark", "grey", "white"]
+  floor:
+    colors: ["concrete", "tiles_light", "tiles_dark"]
+  lighting:
+    azimuth_range: [0, 360]
+    elevation_range: [25, 75]
+    intensity_range: [0.4, 1.0]
+    color_temps: [warm, neutral, cool]
+  camera:
+    ego_position_noise_cm: 2.0
+    ego_rotation_noise_deg: 3.0
+  distractors:
+    show_probability: 0.5
+    position_noise_m: 0.08
+  robot:
+    enabled: false
+    joint_damping_scale: [0.9, 1.1]
+    actuator_gain_scale: [0.95, 1.05]
+
+# Trajectory planning
+trajectory:
+  # Phase durations (control steps at 30Hz)
+  phase_steps:
+    home: 15           # 0.5s  settle into home stance
+    pre_approach: 25   # ~0.8s  arms open wide
+    approach: 30       # 1.0s  close in toward box sides
+    squeeze: 20        # ~0.7s  compress for grip
+    lift: 30           # 1.0s  raise box
+    hold: 20           # ~0.7s  static hold at top
+  timing_variation: 0.10   # ±10% per-phase random
+  squeeze_offset_y_range: [0.035, 0.045]   # how deep into box surface
+  lift_offset_z_range: [0.12, 0.18]        # lift height above table
+  max_planning_attempts: 10
+
+# Data output
+data:
+  format: lerobot_v2
+  raw_episode_dir: raw_episodes
+  lerobot_dir: lerobot_dataset
+  save_failed_episodes: true
+  filter_failures: true
+  video_codec: mp4v

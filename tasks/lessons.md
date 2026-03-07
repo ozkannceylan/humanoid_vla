@@ -2,6 +2,11 @@
 
 ---
 
+## L000: Re-check workflow instructions before and during implementation
+**Discovery:** It is easy to focus on code and drift from repository-specific workflow rules in `CLAUDE.md`.
+**Fix:** Re-read `CLAUDE.md` at the start of non-trivial work and after any user correction, then reflect the rule in planning, verification, and documentation.
+**Rule:** Treat `CLAUDE.md` as an always-on contract: plan first, track progress, verify before done, and record corrections in `tasks/lessons.md`.
+
 ## L001: G1 uses torque actuators, not position actuators
 **Discovery:** `g1_29dof.xml` uses `<motor>` actuators only. `data.ctrl[i]` = torque (Nm).
 There are no `<position>` or `<velocity>` servo actuators.

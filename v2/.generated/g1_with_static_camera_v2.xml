@@ -11,7 +11,7 @@
 -->
 <mujoco model="g1_with_camera">
 
-  <include file="models/g1_29dof.xml"/>
+  <include file="/home/ozkan/projects/humanoid_vla/v2/.generated/g1_29dof_v2.xml"/>
 
   <statistic center="0 0 0.5" extent="2.0"/>
 
@@ -37,6 +37,8 @@
 
     <!-- Fixed overhead camera for debugging / demo monitoring -->
     <camera name="scene_camera" pos="0.3 -0.8 1.6" xyaxes="1 0 0 0 0.5 1"/>
+    <camera name="static_topdown_camera" pos="0.3 -0.1 1.2" euler="0 0 0" fovy="55"/>
+    <camera name="static_corner_camera" pos="-0.05 -0.85 1.5" euler="-35 0 20" fovy="65"/>
 
     <!-- Table for manipulation tasks — within right arm workspace.
          Table top at z=0.8 (half-height 0.4, pos 0 0 0.4). -->

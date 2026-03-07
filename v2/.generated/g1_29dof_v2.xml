@@ -1,5 +1,5 @@
 <mujoco model="g1_29dof">
-  <compiler angle="radian" meshdir="../repos/unitree_mujoco/unitree_robots/g1/meshes" />
+  <compiler angle="radian" meshdir="/home/ozkan/projects/humanoid_vla/repos/unitree_mujoco/unitree_robots/g1/meshes" />
 
   <default>
     <default class="torso_motor">
@@ -408,6 +408,8 @@
                           <!-- Hand site for IK target tracking (palm centre) -->
                           <site name="right_hand_site" pos="0.1 0 0" size="0.015"
                                 rgba="0 1 0 0.5" type="sphere"/>
+                          <camera name="wrist_camera" mode="fixed" fovy="80.0" pos="0.03 0.0 0.02" euler="-90.0 0.0 0.0"/>
+
                         </body>
                       </body>
                     </body>

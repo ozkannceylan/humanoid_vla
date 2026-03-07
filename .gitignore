@@ -1,7 +1,7 @@
 # Python virtual environment
 venv/
 .venv/
-env/
+/env/
 __pycache__/
 *.py[cod]
 *.pyo
@@ -49,6 +49,11 @@ CLAUDE.md
 # !study/*.md
 
 # Demo data (large binary files)
-data/
+/data/
 
 videos
+
+# v2 generated output (episode .npz, checkpoints, etc.)
+v2/output*/
+v2/**/__pycache__/
+v2/**/*.py[cod]
