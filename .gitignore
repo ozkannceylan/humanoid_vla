@@ -35,8 +35,14 @@ Thumbs.db
 logs/*
 !logs/*.log
 
-# Personal notes
+# Personal notes & internal planning
 tasks/ozkan_todo.md
+tasks/plan.md
+tasks/todo.md
+
+# Claude Code config
+CLAUDE.md
+.claude/
 
 # Study notes — track .md files, ignore everything else
 # study/*

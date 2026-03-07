@@ -12,8 +12,6 @@ A simulated **Unitree G1 humanoid robot** controlled by a Vision-Language-Action
 
 ### Single-Arm Manipulation (4 Tasks)
 
-https://github.com/user-attachments/assets/placeholder-all-tasks
-
 <table>
 <tr>
 <td align="center"><b>Reach</b><br><video src="media/reach.mp4" width="300"></video></td>
@@ -26,8 +24,6 @@ https://github.com/user-attachments/assets/placeholder-all-tasks
 </table>
 
 ### Bimanual Physics-Based Grasping
-
-https://github.com/user-attachments/assets/placeholder-bimanual
 
 <table>
 <tr>
@@ -95,8 +91,7 @@ cd humanoid_vla
 chmod +x install_ros2.sh && ./install_ros2.sh
 
 # 3. Python dependencies
-pip3 install --break-system-packages \
-  mujoco opencv-python numpy h5py torch torchvision pynput
+pip3 install --break-system-packages -r requirements.txt
 
 # 4. Robot models
 cd repos

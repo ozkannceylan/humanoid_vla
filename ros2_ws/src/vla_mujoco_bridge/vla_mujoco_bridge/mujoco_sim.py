@@ -32,7 +32,10 @@ import mujoco.viewer
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
-DEFAULT_MODEL_PATH = "/home/ozkan/projects/humanoid_vla/sim/g1_with_camera.xml"
+DEFAULT_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "..", "..", "..", "sim", "g1_with_camera.xml"
+)
 CAMERA_NAME = "ego_camera"
 RENDER_WIDTH = 640
 RENDER_HEIGHT = 480

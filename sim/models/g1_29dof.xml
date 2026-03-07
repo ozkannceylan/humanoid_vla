@@ -1,5 +1,5 @@
 <mujoco model="g1_29dof">
-  <compiler angle="radian" meshdir="/home/ozkan/projects/humanoid_vla/repos/unitree_mujoco/unitree_robots/g1/meshes" />
+  <compiler angle="radian" meshdir="../repos/unitree_mujoco/unitree_robots/g1/meshes" />
 
   <default>
     <default class="torso_motor">
