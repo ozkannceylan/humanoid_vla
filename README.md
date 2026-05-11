@@ -231,6 +231,45 @@ Graceful degradation from 90% to 55% demonstrates real generalization — the mo
 
 ---
 
+## Skills Demonstrated
+
+### ML for Manipulation
+- ACT (Action Chunking with Transformers) policy, 15.6M params, ~0.67s chunks
+- Frozen ResNet18 (layers 0–6) visual encoder + state + task-embedding fusion
+- Temporal ensembling: overlapping chunks with exponential decay weighting
+- Hierarchical task decomposition: composite tasks switch embeddings at grasp trigger
+- Re-grasp prevention via `released` latch in evaluation loop
+
+### Robot Control & Physics
+- PD torque control with per-joint gravity compensation on Unitree G1 (29 DOF)
+- Friction-only bimanual grasping under full `mj_step` dynamics — no weld constraints
+- Iterative Jacobian IK for scripted expert demo generation (single + bimanual)
+- Auto-grasp trigger on hand-to-object proximity for closed-loop manipulation
+- Bilateral contact force monitoring (≥2N per palm, ~13N measured in eval)
+
+### System Integration
+- ROS 2 Jazzy Task Manager node: NL command → ACT inference → MuJoCo at 30Hz
+- rosbridge WebSocket server (port 9090) for external clients (Telegram, JS, Python)
+- Natural language parser routes "pick up" / "lift box" → task ID + arm mode
+- Thread-safe inference loop with daemon threads and ROS2 status publishing
+- JSON-encoded `/vla/status` topic streaming step, progress, and result fields
+
+### Evaluation & Methodology
+- OOD generalization study with progressive difficulty (position / visual / posture / combined)
+- Runtime visual domain randomization (table color, lighting) during training
+- Ablation against in-distribution baseline, holding seeds independent
+- 50 documented engineering lessons (`tasks/lessons.md`, L001–L050)
+- Six deep-dive study documents covering each subsystem end-to-end
+
+### Simulation Engineering
+- MuJoCo MJCF authoring: G1 + table + cameras + objects in `sim/g1_with_camera.xml`
+- 500Hz `mj_step` physics decoupled from 30Hz control loop
+- Egocentric 480×640 RGB camera pipeline rendered headless via EGL
+- HDF5 demo recording + LeRobot format converter for portability
+- Two interactive viewers (`live_demo.py`, `live_bimanual.py`) for qualitative inspection
+
+---
+
 ## ROS2 Integration (Phase D)
 
 The VLA Task Manager accepts natural language commands via ROS2 topics and runs ACT inference in a closed-loop MuJoCo simulation.
