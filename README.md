@@ -1,10 +1,48 @@
 # Humanoid VLA — Vision-Language-Action Controlled Humanoid Robot
 
-A simulated **Unitree G1 humanoid robot** controlled by a Vision-Language-Action (VLA) model, commandable via natural language. The robot sees through an egocentric camera, understands task commands like *"pick up the red cube"*, and generates joint-level motor commands through a trained **ACT (Action Chunking with Transformers)** model.
+![MuJoCo](https://img.shields.io/badge/MuJoCo-3.x-blue)
+![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros)
+![ACT](https://img.shields.io/badge/policy-ACT-orange)
+![Unitree G1](https://img.shields.io/badge/robot-Unitree%20G1-black)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
-> **Status:** Simulation complete — Phases A–F (Domain Randomization & Generalization)
-> **Author:** Ozkan Ceylan
-> **Full Report:** [PROJECT_REPORT.md](PROJECT_REPORT.md)
+![Status](https://img.shields.io/badge/status-Simulation%20complete%20%E2%80%94%20Phases%20A%E2%80%93F-brightgreen)
+
+**TL;DR** — A natural-language-commanded Unitree G1 humanoid built on **MuJoCo + ACT + ROS 2**. Trained ACT (Action Chunking with Transformers) policies achieve **89% combined success across 5 manipulation tasks (89/100 episodes)**, including 100% on physics-based bimanual grasping. An OOD generalization study shows graceful degradation from 90% in-distribution to 55% under combined distribution shift.
+
+## Key Results
+
+<table>
+<tr>
+<td valign="top">
+
+**Task success**
+
+| Track | Success | Episodes |
+|---|---|---|
+| Single-arm (4 tasks) | **86.2%** | 69 / 80 |
+| Bimanual physics grasp | **100%** | 20 / 20 |
+| **Combined** | **89%** | **89 / 100** |
+
+</td>
+<td valign="top">
+
+**OOD generalization (bimanual)**
+
+| Test distribution | Success |
+|---|---|
+| In-distribution | **90%** |
+| OOD position (1.5×) | 80% |
+| OOD visual | 70% |
+| OOD posture (1.5×) | 60% |
+| **OOD combined** | **55%** |
+
+</td>
+</tr>
+</table>
+
+**Author:** Ozkan Ceylan · **Full Report:** [PROJECT_REPORT.md](PROJECT_REPORT.md)
 
 ---
 
