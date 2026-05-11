@@ -52,12 +52,12 @@
 
 <table>
 <tr>
-<td align="center"><b>Reach</b><br><video src="media/reach.mp4" width="300"></video></td>
-<td align="center"><b>Grasp</b><br><video src="media/grasp.mp4" width="300"></video></td>
+<td align="center"><b>Reach</b><br><img src="media/gif/reach.gif" width="300" alt="Reach demo"><br><sub><a href="media/reach.mp4">Full video</a></sub></td>
+<td align="center"><b>Grasp</b><br><img src="media/gif/grasp.gif" width="300" alt="Grasp demo"><br><sub><a href="media/grasp.mp4">Full video</a></sub></td>
 </tr>
 <tr>
-<td align="center"><b>Pick Up</b><br><video src="media/pick.mp4" width="300"></video></td>
-<td align="center"><b>Place</b><br><video src="media/place.mp4" width="300"></video></td>
+<td align="center"><b>Pick Up</b><br><img src="media/gif/pick.gif" width="300" alt="Pick demo"><br><sub><a href="media/pick.mp4">Full video</a></sub></td>
+<td align="center"><b>Place</b><br><img src="media/gif/place.gif" width="300" alt="Place demo"><br><sub><a href="media/place.mp4">Full video</a></sub></td>
 </tr>
 </table>
 
@@ -65,7 +65,7 @@
 
 <table>
 <tr>
-<td align="center"><b>Bimanual Box Lift</b> — Both hands squeeze box via friction only (no weld constraints), full <code>mj_step</code> dynamics<br><video src="media/bimanual.mp4" width="600"></video></td>
+<td align="center"><b>Bimanual Box Lift</b> — Both hands squeeze box via friction only (no weld constraints), full <code>mj_step</code> dynamics<br><img src="media/gif/bimanual.gif" width="600" alt="Bimanual lift demo"><br><sub><a href="media/bimanual.mp4">Full video</a></sub></td>
 </tr>
 </table>
 
