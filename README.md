@@ -48,18 +48,12 @@
 
 ## Demo Videos
 
-### Single-Arm Manipulation (4 Tasks)
+### Single-Arm Manipulation (4 Tasks: Reach + Grasp + Pick Up + Place)
 
-<table>
-<tr>
-<td align="center"><b>Reach</b><br><img src="media/gif/reach.gif" width="300" alt="Reach demo"><br><sub><a href="media/reach.mp4">Full video</a></sub></td>
-<td align="center"><b>Grasp</b><br><img src="media/gif/grasp.gif" width="300" alt="Grasp demo"><br><sub><a href="media/grasp.mp4">Full video</a></sub></td>
-</tr>
-<tr>
-<td align="center"><b>Pick Up</b><br><img src="media/gif/pick.gif" width="300" alt="Pick demo"><br><sub><a href="media/pick.mp4">Full video</a></sub></td>
-<td align="center"><b>Place</b><br><img src="media/gif/place.gif" width="300" alt="Place demo"><br><sub><a href="media/place.mp4">Full video</a></sub></td>
-</tr>
-</table>
+<p align="center">
+  <img src="media/gif/single_arm.gif" width="600" alt="Single-arm: reach → grasp → pick → place"><br>
+  <sub>Full videos: <a href="media/reach.mp4">reach</a> · <a href="media/grasp.mp4">grasp</a> · <a href="media/pick.mp4">pick</a> · <a href="media/place.mp4">place</a> · <a href="media/single_arm.mp4">combined</a></sub>
+</p>
 
 ### Bimanual Physics-Based Grasping
 
