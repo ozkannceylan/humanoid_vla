@@ -42,6 +42,20 @@ RENDER_W, RENDER_H = 640, 480
 FPS = 15
 
 
+def hide_green_box(sim):
+    """Make the bimanual green box invisible and non-colliding for single-arm recordings."""
+    geom_id = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_GEOM, "box_geom")
+    if geom_id < 0:
+        return
+    sim.model.geom_rgba[geom_id, 3] = 0.0
+    sim.model.geom_contype[geom_id] = 0
+    sim.model.geom_conaffinity[geom_id] = 0
+    joint_id = mujoco.mj_name2id(sim.model, mujoco.mjtObj.mjOBJ_JOINT, "box_joint")
+    if joint_id >= 0:
+        qadr = sim.model.jnt_qposadr[joint_id]
+        sim.model.qpos0[qadr:qadr + 3] = [5.0, 5.0, -2.0]
+
+
 # ── Rendering helpers ─────────────────────────────────
 
 def render_scene(sim, camera_name=SCENE_CAMERA):
@@ -342,6 +356,10 @@ def main():
                         help="Output directory for video files")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--skip-bimanual", action="store_true",
+                        help="Only record the 4 single-arm clips")
+    parser.add_argument("--skip-single-arm", action="store_true",
+                        help="Skip the 4 single-arm clips")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -366,38 +384,50 @@ def main():
         print(f"Loaded {label} model [epoch {ckpt['epoch']}, loss {ckpt['loss']:.6f}]")
         return model
 
-    sa_model = load_model(args.sa_checkpoint, "single-arm")
-    bm_model = load_model(args.bm_checkpoint, "bimanual")
+    sa_model = load_model(args.sa_checkpoint, "single-arm") if not args.skip_single_arm else None
+    bm_model = load_model(args.bm_checkpoint, "bimanual") if not args.skip_bimanual else None
 
     rng = np.random.default_rng(args.seed)
-
-    # ── Single-arm tasks ────────────────────────────────
-    single_arm_tasks = [
-        ("reach", "reach the red cube"),
-        ("grasp", "grasp the red cube"),
-        ("pick", "pick up the red cube"),
-        ("place", "place the red cube on the blue plate"),
-    ]
-
-    sa_sim = SimWrapper()
     all_frames = []  # for combined video
 
-    for filename, task_label in single_arm_tasks:
-        print(f"\nRecording: {task_label}")
-        frames = record_single_arm_episode(
-            sa_model, sa_sim, task_label, rng, device=args.device)
-        frames = add_success_overlay(frames)
+    # ── Single-arm tasks ────────────────────────────────
+    if not args.skip_single_arm:
+        single_arm_tasks = [
+            ("reach", "reach the red cube"),
+            ("grasp", "grasp the red cube"),
+            ("pick", "pick up the red cube"),
+            ("place", "place the red cube on the blue plate"),
+        ]
 
-        # Save individual clip
-        clip_path = os.path.join(args.output_dir, f"{filename}.mp4")
-        write_video(clip_path, frames)
+        sa_sim = SimWrapper()
+        hide_green_box(sa_sim)
+        # Apply the qpos0 change to the live state
+        sa_sim.data.qpos[:] = sa_sim.model.qpos0
+        mujoco.mj_forward(sa_sim.model, sa_sim.data)
 
-        # Add title card + clip to combined video
-        all_frames.extend(make_title_card(
-            task_label.upper(), canvas_w, canvas_h, frames=15))
-        all_frames.extend(frames)
+        for filename, task_label in single_arm_tasks:
+            print(f"\nRecording: {task_label}")
+            frames = record_single_arm_episode(
+                sa_model, sa_sim, task_label, rng, device=args.device)
+            frames = add_success_overlay(frames)
 
-    sa_sim.renderer.close()
+            # Save individual clip
+            clip_path = os.path.join(args.output_dir, f"{filename}.mp4")
+            write_video(clip_path, frames)
+
+            # Add title card + clip to combined video
+            all_frames.extend(make_title_card(
+                task_label.upper(), canvas_w, canvas_h, frames=15))
+            all_frames.extend(frames)
+
+        sa_sim.renderer.close()
+
+    if args.skip_bimanual:
+        if all_frames:
+            combined_path = os.path.join(args.output_dir, "all_tasks.mp4")
+            write_video(combined_path, all_frames)
+        print("\nSkipped bimanual recordings.")
+        return
 
     # ── Bimanual task (adaptability demo) ─────────────
     print(f"\nRecording: bimanual adaptability demo (4 episodes)")
