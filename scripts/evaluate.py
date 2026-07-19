@@ -33,6 +33,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 from act_model import ACTPolicy, TASK_LABELS, task_to_id
 from generate_demos import SimWrapper, RIGHT_ARM_CTRL
 
+# Prefer installed humanoid_vla (`pip install -e .`); fall back to source tree.
+try:
+    import humanoid_vla  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+from humanoid_vla.stats import format_rate
+
 
 # ────────────────────────────────────────────────────────
 # Success detectors
@@ -78,7 +85,8 @@ SUCCESS_FN = {
 
 def run_episode(model, sim, task_label, rng, device='cuda',
                 max_steps=150, auto_grasp_dist=0.04, auto_release_delay=30,
-                chunk_exec=5, ensemble_k=0.01, noise_range=0.03):
+                chunk_exec=5, ensemble_k=0.01, noise_range=0.03,
+                random_start=0.0):
     """Run one episode with the ACT policy in kinematic MuJoCo sim.
 
     Uses temporal ensembling (ACT paper, Zhao et al. 2023):
@@ -102,6 +110,12 @@ def run_episode(model, sim, task_label, rng, device='cuda',
     Returns: (success, trajectory_length, final_hand_cube_dist)
     """
     sim.reset_with_noise(rng, noise_range=noise_range)
+    # Posture randomization must happen AFTER the reset. It used to be applied
+    # by the caller *before* run_episode, where reset_with_noise immediately
+    # overwrote it — silently disabling the OOD-posture condition
+    # (docs/CODEBASE_REVIEW.md §2.5).
+    if random_start > 0:
+        sim.random_arm_start(rng, spread=random_start)
     chunk_size = model.chunk_size
     action_dim = model.action_dim
 
@@ -186,34 +200,20 @@ def run_episode(model, sim, task_label, rng, device='cuda',
 
 
 def load_model(checkpoint_path, device='cuda'):
-    """Load ACT model from checkpoint."""
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    config = ckpt['config']
+    """Load a policy checkpoint (new humanoid_vla/v2 or legacy format).
 
-    model = ACTPolicy(
-        state_dim=config['state_dim'],
-        action_dim=config['action_dim'],
-        chunk_size=config['chunk_size'],
-        hidden_dim=config['hidden_dim'],
-        nhead=config['nhead'],
-        num_layers=config['num_layers'],
-        num_tasks=config['num_tasks'],
-    ).to(device)
-
-    model.load_state_dict(ckpt['model_state_dict'])
-    model.eval()
-
-    print(f"Loaded model from {checkpoint_path}")
-    print(f"  Epoch: {ckpt['epoch']}, Loss: {ckpt['loss']:.6f}")
-    print(f"  Tasks: {config.get('task_labels', 'N/A')}")
-    return model, config
+    Returns (policy, config) where policy exposes .predict/.chunk_size/
+    .action_dim/.task_labels for both formats.
+    """
+    from humanoid_vla.loading import load_policy
+    return load_policy(checkpoint_path, device=device)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate ACT policy in simulation")
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
-    parser.add_argument("--episodes", type=int, default=10,
-                        help="Episodes per task")
+    parser.add_argument("--episodes", type=int, default=50,
+                        help="Episodes per task (>=50 for meaningful CIs)")
     parser.add_argument("--tasks", nargs="*", default=None,
                         help="Tasks to evaluate (default: all known)")
     parser.add_argument("--seed", type=int, default=123)
@@ -229,7 +229,8 @@ def main():
     rng = np.random.default_rng(args.seed)
 
     # Determine which tasks to evaluate
-    task_labels_from_ckpt = config.get('task_labels', TASK_LABELS)
+    task_labels_from_ckpt = getattr(model, 'task_labels', None) \
+        or config.get('task_labels', TASK_LABELS)
     if args.tasks:
         task_labels = [t for t in task_labels_from_ckpt
                        if any(key in t for key in args.tasks)]
@@ -273,12 +274,11 @@ def main():
         total_episodes += args.episodes
 
         tag = "✓" if rate >= 50 else "✗"
-        print(f"  {tag} {task_label:40s} — {successes}/{args.episodes} "
-              f"({rate:5.1f}%) — avg_d={avg_dist:.3f} — {elapsed:.1f}s")
+        print(f"  {tag} {task_label:40s} — {format_rate(successes, args.episodes)} "
+              f"— avg_d={avg_dist:.3f} — {elapsed:.1f}s")
 
-    overall_rate = total_success / total_episodes * 100 if total_episodes else 0
     print(f"\n{'─'*60}")
-    print(f"  Overall: {total_success}/{total_episodes} ({overall_rate:.1f}%)")
+    print(f"  Overall: {format_rate(total_success, total_episodes)}")
     print(f"{'─'*60}")
 
     # Phase B success criterion: >50% on reach

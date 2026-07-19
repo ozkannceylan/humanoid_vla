@@ -1,5 +1,29 @@
 # Upgrade Plan — Roadmap to a SOTA-Credible Humanoid VLA Stack
 
+> **Implementation status (July 2026)** — the first tranche has landed:
+>
+> - **Phase 0 (partial)**: installable `src/humanoid_vla` package (`pip install -e .`),
+>   root `pyproject.toml` with extras + ruff/pytest config, `Makefile`,
+>   `scripts/fetch_assets.sh` (fixes the broken-gitlink mesh problem), GitHub Actions CI
+>   (lint + 62 unit tests + MJCF physics smoke), tracked `.pyc` files and orphan gitlinks
+>   removed, README broken references fixed, wrong param-count docstrings and the
+>   inverted ResNet table in PROJECT_REPORT corrected.
+>   *Deliberately deferred to the repo owner: the git-history rewrite (venv purge) and
+>   media→LFS migration, since both force-push rewritten history.*
+> - **Phase 1 (core)**: unified trainer `python -m humanoid_vla.train` with global
+>   seeding, stratified episode-level train/val split, val-loss `best.pt` selection,
+>   state/action normalization from train-split statistics (stored in checkpoints),
+>   L1 loss default, AMP, multi-worker loading, optional wandb; Wilson 95 % CIs wired
+>   into all evaluators (default 50 episodes); the OOD-posture double-reset bug fixed.
+> - **Phase 2 (foundation)**: frozen-CLIP text conditioning (`--conditioning text`),
+>   paraphrase corpus with train/held-out splits (`instructions.py`), instruction
+>   embeddings persisted in checkpoints, and the ROS NL parser replaced by the
+>   unit-tested `humanoid_vla.nl_parser` (keyword-hijack + silent-fallback bugs fixed).
+> - **Phase 7 (start)**: single `TemporalEnsembler` implementation in
+>   `humanoid_vla.runner` ready to replace the five inline copies.
+>
+> Remaining phases (3–8) and the rest of 0/2/7 proceed as planned below.
+
 This plan converts the findings of the [Codebase Review](CODEBASE_REVIEW.md) into a
 phased, prioritized roadmap. Each phase has concrete tasks, acceptance criteria, an
 effort estimate, and a hardware budget (local RTX 4050 6 GB vs. short rented-GPU runs).

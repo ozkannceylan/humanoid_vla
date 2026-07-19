@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (CPU torch)
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .[dev]
+      - name: Unit tests
+        run: pytest -m "not slow" -q
+
+  sim-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Fetch robot assets
+        run: ./scripts/fetch_assets.sh
+      - name: Install mujoco
+        run: pip install "mujoco>=3.1,<4" numpy
+      - name: Load scene and step physics
+        run: |
+          python3 - <<'EOF'
+          import mujoco
+          m = mujoco.MjModel.from_xml_path("sim/g1_with_camera.xml")
+          d = mujoco.MjData(m)
+          for _ in range(200):
+              mujoco.mj_step(m, d)
+          assert m.nu == 29, f"expected 29 actuators, got {m.nu}"
+          print("sim smoke OK:", m.nu, "actuators,", m.nq, "qpos,", m.ncam, "cameras")
+          EOF

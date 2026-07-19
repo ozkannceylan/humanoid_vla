@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-scripts/train_bimanual.py
+scripts/train_bimanual.py — LEGACY bimanual trainer.
 
+SUPERSEDED by the unified trainer (dims are inferred from the data):
+
+  python3 -m humanoid_vla.train --demos data/bimanual_demos_phase_f2 \\
+      --output data/bimanual_checkpoints_v2 --filter-success
+
+Kept for reproducing the original Phase C2/F results.
 Train a bimanual ACT model on physics-based demo data.
 Separate from the single-arm model — different dimensions and single task.
 

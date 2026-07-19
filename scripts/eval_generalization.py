@@ -44,6 +44,7 @@ from domain_randomization import DomainRandomizer
 from evaluate import run_episode, load_model, SUCCESS_FN
 from physics_sim import PhysicsSim
 from evaluate_bimanual import evaluate_episode as evaluate_bimanual_episode
+from humanoid_vla.stats import wilson_ci
 
 
 DISTRIBUTIONS = {
@@ -91,14 +92,15 @@ def run_eval_suite(model, sim, task_label, rng, device, episodes,
         if domain_rand:
             sim.randomizer.randomize(rng)
 
-        # Apply random starting posture
-        if random_start > 0:
-            sim.random_arm_start(rng, spread=random_start)
-
+        # NOTE: posture randomization is passed INTO run_episode (applied after
+        # its internal reset). Applying it here beforehand was a bug — the
+        # reset inside run_episode overwrote it, silently disabling the
+        # ood_posture condition for single-arm evaluation.
         ok, length, dist = run_episode(
             model, sim, task_label, rng,
             device=device, max_steps=max_steps,
             noise_range=noise_range,
+            random_start=random_start,
         )
         successes += int(ok)
         dists.append(dist)
@@ -289,7 +291,7 @@ def main():
     print(header)
     print("-" * len(header))
 
-    # Per-task rows
+    # Per-task rows (success rate with Wilson 95% CI)
     for task_label in task_labels:
         short_task = task_label[:40]
         row = f"{short_task:<42s}"
@@ -298,6 +300,15 @@ def main():
             rate = r.get('rate', 0)
             row += f" {rate:9.1f}%"
         print(row)
+        ci_row = f"{'  (95% CI)':<42s}"
+        for dk in dist_keys:
+            r = all_results[dk].get(task_label, {})
+            if r.get('episodes'):
+                lo, hi = wilson_ci(r['successes'], r['episodes'])
+                ci_row += f" {lo * 100:4.0f}-{hi * 100:3.0f}%"
+            else:
+                ci_row += f" {'—':>10s}"
+        print(ci_row)
 
     # Overall row
     print("-" * len(header))

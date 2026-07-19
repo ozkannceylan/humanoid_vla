@@ -119,19 +119,16 @@ User: "Pick up the red cube"
 git clone https://github.com/ozkanceylan/humanoid_vla.git
 cd humanoid_vla
 
-# 2. Install ROS2
+# 2. Robot model assets (G1 meshes) + Python package (editable install)
+./scripts/fetch_assets.sh
+pip3 install -e .[dev,track]        # add [lang] for text conditioning (CLIP)
+
+# 3. Verify the setup (no GPU needed)
+make smoke                          # loads the MJCF scene, steps physics
+pytest -m "not slow" -q             # unit test suite
+
+# 4. (Optional) ROS2 for the natural-language interface
 chmod +x install_ros2.sh && ./install_ros2.sh
-
-# 3. Python dependencies
-pip3 install --break-system-packages -r requirements.txt
-
-# 4. Robot models
-cd repos
-git clone https://github.com/unitreerobotics/unitree_mujoco
-git clone https://github.com/google-deepmind/mujoco_menagerie
-cd ..
-
-# 5. Build ROS2 workspace
 source /opt/ros/jazzy/setup.bash
 cd ros2_ws && colcon build --symlink-install && cd ..
 source ros2_ws/install/setup.bash
@@ -144,13 +141,16 @@ source ros2_ws/install/setup.bash
 MUJOCO_GL=egl python3 scripts/generate_demos.py --all-tasks --episodes 20
 MUJOCO_GL=egl python3 scripts/generate_bimanual_demos.py --episodes 30
 
-# 2. Train ACT models (~2.5 hours total on RTX 4050)
-python3 scripts/train_act.py --demos data/demos --epochs 300 --batch-size 32
-python3 scripts/train_bimanual.py --epochs 300
+# 2. Train ACT models (~2.5 hours total on RTX 4050; AMP + seeded + val split)
+python3 -m humanoid_vla.train --demos data/demos --output data/checkpoints_v2 --wandb
+python3 -m humanoid_vla.train --demos data/bimanual_demos_phase_f2 \
+    --output data/bimanual_checkpoints_v2 --filter-success --wandb
+# add `--conditioning text` (requires pip install -e .[lang]) for CLIP-text
+# instruction conditioning trained on paraphrases
 
-# 3. Evaluate
-MUJOCO_GL=egl python3 scripts/evaluate.py --checkpoint data/checkpoints/best.pt --episodes 20
-MUJOCO_GL=egl python3 scripts/evaluate_bimanual.py --checkpoint data/bimanual_checkpoints/best.pt --episodes 20
+# 3. Evaluate (50 episodes/task, Wilson 95% CIs)
+MUJOCO_GL=egl python3 scripts/evaluate.py --checkpoint data/checkpoints_v2/best.pt --episodes 50
+MUJOCO_GL=egl python3 scripts/evaluate_bimanual.py --checkpoint data/bimanual_checkpoints_v2/best.pt --episodes 50
 
 # 4. Interactive demos (opens MuJoCo viewer)
 python3 scripts/live_demo.py --checkpoint data/checkpoints/best.pt
@@ -358,7 +358,23 @@ Chunk size: 20 timesteps (~0.67s). Training: AdamW (lr=1e-4), CosineAnnealing, M
 ```
 humanoid_vla/
 ├── README.md                          # This file
-├── CLAUDE.md                          # Project vision & phase plan
+├── pyproject.toml                     # Installable package + pinned deps + ruff/pytest config
+├── Makefile                           # setup / lint / test / smoke / train entry points
+├── .github/workflows/ci.yml           # CI: lint + unit tests + MJCF physics smoke test
+│
+├── src/humanoid_vla/                  # Installable training/eval package (v0.2)
+│   ├── train.py                       # Unified trainer: seeding, val split, AMP, wandb
+│   ├── data.py                        # Unified HDF5 dataset (single-arm + bimanual)
+│   ├── models/act.py                  # ACT v2: spatial tokens, text conditioning, norm
+│   ├── models/text_encoder.py         # Frozen CLIP text tower (instruction embeddings)
+│   ├── instructions.py                # Paraphrase corpus (train / held-out splits)
+│   ├── loading.py                     # Checkpoint I/O (v2 + legacy formats)
+│   ├── runner.py                      # TemporalEnsembler (the single implementation)
+│   ├── normalization.py               # Dataset-statistics state/action normalization
+│   ├── stats.py                       # Wilson 95% CIs for all reported success rates
+│   └── nl_parser.py                   # NL command routing (unit-tested, used by ROS node)
+│
+├── tests/                             # Unit + integration tests (pytest)
 │
 ├── sim/                               # MuJoCo simulation
 │   ├── g1_with_camera.xml             # Scene: G1 + table + objects + cameras
@@ -415,7 +431,6 @@ humanoid_vla/
 │   └── 05_system_integration.md       # Task Manager, rosbridge, NL parsing
 │
 ├── tasks/                             # Project management
-│   ├── todo.md                        # Phase tracker with milestones
 │   └── lessons.md                     # Engineering lessons (L001-L050)
 │
 └── logs/                              # Training logs
