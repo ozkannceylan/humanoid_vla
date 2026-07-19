@@ -42,7 +42,7 @@
 </tr>
 </table>
 
-**Author:** Ozkan Ceylan · **Full Report:** [PROJECT_REPORT.md](PROJECT_REPORT.md)
+**Author:** Ozkan Ceylan · **Full Report:** [PROJECT_REPORT.md](PROJECT_REPORT.md) · **Roadmap:** [Upgrade Plan](docs/UPGRADE_PLAN.md) · [Architecture](docs/ARCHITECTURE.md) · [Codebase Review](docs/CODEBASE_REVIEW.md)
 
 ---
 
@@ -425,6 +425,14 @@ humanoid_vla/
 ---
 
 ## Documentation
+
+### Engineering Docs (Review · Plan · Architecture)
+
+| Document | Contents |
+|---|---|
+| [docs/CODEBASE_REVIEW.md](docs/CODEBASE_REVIEW.md) | Candid full-repo technical review: strengths, limitations, and a gap analysis against the mid-2026 VLA/humanoid state of the art |
+| [docs/UPGRADE_PLAN.md](docs/UPGRADE_PLAN.md) | Phased roadmap (Phases 0–8): reproducibility & CI, statistical rigor, real language conditioning, physics-true manipulation, policy-head bake-off, LeRobot v3 data platform, SOTA VLA fine-tuning, ROS 2 actions, whole-body control |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture: the current as-built pipeline and the target post-upgrade design |
 
 ### Study Documents (Deep Dives)
 
