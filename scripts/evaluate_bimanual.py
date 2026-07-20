@@ -37,6 +37,12 @@ from physics_sim import (
     CONTROL_HZ,
 )
 
+# Prefer installed humanoid_vla (`pip install -e .`); fall back to source tree.
+try:
+    import humanoid_vla  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
 # ────────────────────────────────────────────────────────
 # Constants
 # ────────────────────────────────────────────────────────
@@ -143,26 +149,9 @@ def main():
                         default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
-    # Load model
-    ckpt = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
-    config = ckpt['config']
-
-    model = ACTPolicy(
-        state_dim=config['state_dim'],
-        action_dim=config['action_dim'],
-        chunk_size=config['chunk_size'],
-        hidden_dim=config['hidden_dim'],
-        nhead=config['nhead'],
-        num_layers=config['num_layers'],
-        num_tasks=config['num_tasks'],
-    ).to(args.device)
-    model.load_state_dict(ckpt['model_state_dict'])
-    model.eval()
-
-    print(f"Loaded bimanual ACT model [epoch {ckpt['epoch']}, "
-          f"loss {ckpt['loss']:.6f}]")
-    print(f"  state_dim={config['state_dim']}, action_dim={config['action_dim']}, "
-          f"chunk_size={config['chunk_size']}")
+    # Load model (handles both humanoid_vla/v2 and legacy checkpoint formats)
+    from humanoid_vla.loading import load_policy
+    model, config = load_policy(args.checkpoint, device=args.device)
 
     # Create sim
     sim = PhysicsSim()
@@ -211,7 +200,8 @@ def main():
     print(f"\n{'='*60}")
     print(f"Results")
     print(f"{'='*60}")
-    print(f"  Success rate: {successes}/{args.episodes} ({rate:.0f}%)")
+    from humanoid_vla.stats import format_rate
+    print(f"  Success rate: {format_rate(successes, args.episodes)}")
     print(f"  Lift:  mean={np.mean(lifts):.1f}cm, "
           f"min={np.min(lifts):.1f}cm, max={np.max(lifts):.1f}cm")
     print(f"  Force: L_mean={np.mean(forces_l):.1f}N, "

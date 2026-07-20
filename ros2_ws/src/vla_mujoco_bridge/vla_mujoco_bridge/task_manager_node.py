@@ -64,6 +64,16 @@ _SCRIPT_DIR = os.path.abspath(
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
+# Prefer the installed humanoid_vla package (`pip install -e .`); fall back to
+# the source tree for from-source runs without installation.
+try:
+    import humanoid_vla  # noqa: F401
+except ImportError:
+    _SRC_DIR = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
+    if _SRC_DIR not in sys.path:
+        sys.path.insert(0, _SRC_DIR)
+
 import torch
 from act_model import ACTPolicy, TASK_LABELS, task_to_id
 
@@ -92,40 +102,12 @@ def _lazy_simwrapper():
 # NL Command Parser
 # ────────────────────────────────────────────────────────
 
-BIMANUAL_KEYWORDS = ["box", "both hands", "bimanual", "two hand", "green"]
-
-SINGLE_ARM_COMMANDS = {
-    "reach": "reach the red cube",
-    "grasp": "grasp the red cube",
-    "pick": "pick up the red cube",
-    "place": "place the red cube on the blue plate",
-}
-
-
-def parse_task_command(text: str):
-    """Parse NL command into (mode, task_label).
-
-    Returns:
-        mode: "single_arm" or "bimanual"
-        task_label: canonical task label string
-    """
-    text_lower = text.strip().lower()
-
-    # Check bimanual keywords
-    if any(kw in text_lower for kw in BIMANUAL_KEYWORDS):
-        return "bimanual", "pick up the green box with both hands"
-
-    # Check exact matches
-    if text_lower in TASK_LABELS:
-        return "single_arm", text_lower
-
-    # Check short aliases
-    for alias, full in SINGLE_ARM_COMMANDS.items():
-        if alias in text_lower:
-            return "single_arm", full
-
-    # Default to pick (most common task)
-    return "single_arm", "pick up the red cube"
+# Routing lives in the installable, unit-tested humanoid_vla package.
+# The old inline matcher had two real bugs (fixed there): "green"/"box"
+# hijacked single-arm commands to bimanual, and unknown commands silently
+# executed "pick up the red cube". Unroutable commands now return (None, None)
+# and are rejected with an error status instead of guessing.
+from humanoid_vla.nl_parser import parse_task_command  # noqa: E402
 
 
 # ────────────────────────────────────────────────────────
@@ -418,6 +400,15 @@ class TaskManagerNode(Node):
         """Execute a task command (runs in separate thread)."""
         try:
             mode, task_label = parse_task_command(command)
+            if mode is None:
+                self.get_logger().warn(f"Cannot route command: '{command}'")
+                self._publish_status(0, 0, "error", {
+                    "error": "unrecognized command",
+                    "command": command,
+                    "hint": "try: 'pick up the red cube' or "
+                            "'lift the green box with both hands'",
+                })
+                return
             self.get_logger().info(
                 f"Executing: '{command}' → mode={mode}, task='{task_label}'")
 

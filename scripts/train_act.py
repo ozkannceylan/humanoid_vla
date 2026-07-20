@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """
-scripts/train_act.py
+scripts/train_act.py — LEGACY single-arm trainer.
 
-Standalone ACT training — reads HDF5 demos directly, trains an ACT policy,
-saves checkpoints. No LeRobot dependency needed for training.
+SUPERSEDED by the unified trainer, which adds seeding, a train/val split with
+val-loss checkpoint selection, normalization, AMP, and wandb logging:
+
+  python3 -m humanoid_vla.train --demos data/demos --output data/checkpoints_v2
+
+Kept for reproducing the original Phase C results. Reads HDF5 demos directly,
+trains the legacy ACT policy, saves checkpoints.
 
 Usage:
-  cd ~/projects/humanoid_vla
   python3 scripts/train_act.py                               # defaults: 300 epochs
   python3 scripts/train_act.py --epochs 1000 --batch-size 16 # longer training
   python3 scripts/train_act.py --resume data/checkpoints/latest.pt
 
 Training on RTX 4050 (6GB VRAM):
-  - ACT model: ~6M trainable params, ~1.5 GB VRAM at batch_size=32
+  - ACT model: ~12.8M trainable params (~15.6M total), ~1.5 GB VRAM at batch_size=32
   - 300 epochs ≈ 40 min, 1000 epochs ≈ 2.2 hours
-  - Loss should drop below 0.001 for good convergence
+  - NOTE: training loss alone is not a success signal — evaluate in closed loop
 """
 
 import argparse

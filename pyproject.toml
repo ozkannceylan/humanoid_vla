@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "humanoid-vla"
+version = "0.2.0"
+description = "Vision-Language-Action pipeline for a Unitree G1 humanoid in MuJoCo (ACT policies, ROS 2 integration)"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Ozkan Ceylan", email = "ozkannceylan@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24,<3",
+    "h5py>=3.9,<4",
+    "opencv-python>=4.8,<5",
+    "mujoco>=3.1,<4",
+    "torch>=2.3",
+    "torchvision>=0.18",
+]
+
+[project.optional-dependencies]
+# Text conditioning (frozen CLIP text encoder) for `--conditioning text`.
+lang = ["transformers>=4.44"]
+# Experiment tracking.
+track = ["wandb>=0.17"]
+# Development / CI.
+dev = ["pytest>=8", "ruff>=0.6"]
+# Teleop keyboard input (legacy scripts).
+teleop = ["pynput>=1.7"]
+
+[project.scripts]
+hvla-train = "humanoid_vla.train:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# Legacy scripts/ and the ROS workspace are linted separately as they are
+# incrementally migrated; the installable package and tests must stay clean.
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # long lines in docstrings/tables are acceptable
+    "SIM108", # ternary is not always clearer
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: tests that train a model or need large downloads (deselect with '-m \"not slow\"')",
+]

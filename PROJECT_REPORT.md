@@ -224,15 +224,20 @@ ACT (Action Chunking with Transformers) predicts **chunks of future actions** ra
 
 | Component | Params | Trainable |
 |-----------|--------|-----------|
-| ResNet18 (layers 0-6) | 3.8M | Frozen |
-| ResNet18 (layer 4) | 4.2M | Yes |
+| ResNet18 (layers 0-6) | 2.8M | Frozen |
+| ResNet18 (layer 4) | 8.4M | Yes |
 | Image projection | 131K | Yes |
 | State MLP | 66K | Yes |
 | Task embedding | 1K | Yes |
-| Transformer decoder | 3.4M | Yes |
-| Action head | 5.1K | Yes |
+| Transformer decoder | 4.2M | Yes |
+| Action head | 7.5K | Yes |
 | Query embeddings | 5.1K | Yes |
 | **Total** | **15.6M** | **12.8M trainable** |
+
+> Correction (July 2026): an earlier version of this table inverted the ResNet
+> split (listing layers 0–6 as 3.8M and layer4 as 4.2M). Layer4 is in fact
+> ~8.4M — about 75 % of the backbone — so fine-tuning it is a much larger
+> fraction of trainable weights than originally implied.
 
 ### 5.3 Why Freeze ResNet Layers 0-6?
 

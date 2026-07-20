@@ -1,7 +1,10 @@
-mujoco>=3.0
-opencv-python>=4.8
-numpy>=1.24
-h5py>=3.9
-torch>=2.1
-torchvision>=0.16
-pynput>=1.7
+# Dependency management moved to pyproject.toml — install the package instead:
+#
+#   pip3 install -e .[dev,track]          # core + tests/lint + wandb
+#   pip3 install -e .[lang]               # + transformers (CLIP text conditioning)
+#
+# For CUDA-specific torch builds, install torch first from the matching index:
+#   pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#
+# This file is kept as a thin alias for tooling that expects it.
+-e .

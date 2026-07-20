@@ -52,3 +52,7 @@ CLAUDE.md
 data/
 
 videos
+
+# Third-party robot assets (fetched by scripts/fetch_assets.sh)
+repos/unitree_mujoco/
+repos/mujoco_menagerie/

@@ -208,8 +208,13 @@ class ACTPolicy(nn.Module):
       Transformer decoder: queries attend to memory → chunk_size output tokens
       Linear head: each output → action_dim
 
-    Total params: ~6M trainable (ResNet18 layer4 + decoder + heads)
+    Total params: ~15.6M, of which ~12.8M trainable (ResNet18 layer4 ≈ 8.4M
+    + decoder ≈ 4.2M + heads; frozen layers 0-6 ≈ 2.8M).
     VRAM usage: ~1.5 GB at batch_size=32
+
+    NOTE: legacy implementation kept for old-checkpoint compatibility.
+    New training should use humanoid_vla.models.act.ACTPolicy
+    (spatial vision tokens, text conditioning, built-in normalization).
     """
 
     def __init__(self, state_dim: int = 58, action_dim: int = 29,
